@@ -1,0 +1,26 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+AGENTS.md
+*.egg-info
+
+# Virtual environments
+.venv
+
+.env
+
+# Generated knowledge-base artifacts
+data/processed/
+data/vector_store/
+
+Coating_Compass_Project_Brief.md
+
+data/dulux_canada_knowledge_sources/*.pdf
+data/dulux_canada_knowledge_sources/manifest.csv
+.gitignore
+data/dulux_canada_knowledge_sources/README.md
+.gitignore
+data/dulux_canada_knowledge_sources/manifest.json
