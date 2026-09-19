@@ -1,24 +1,30 @@
 import hashlib
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import TypedDict
 
+import requests
+import truststore
 from dotenv import load_dotenv
-from langchain_chroma import Chroma
-from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_groq import ChatGroq
+from langchain_qdrant import QdrantVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, START, StateGraph
+from pypdf import PdfReader
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams
 
 
 SOURCE_DIRECTORY = Path("data/dulux_canada_knowledge_sources")
 MANIFEST_PATH = SOURCE_DIRECTORY / "manifest.json"
-VECTOR_STORE_DIRECTORY = Path("data/vector_store")
+VECTOR_STORE_DIRECTORY = Path("data/vector_store/qdrant")
 COLLECTION_NAME = "coating-compass-baseline-v1"
+EMBEDDING_DIMENSIONS = 1_536
 
 CHUNK_SIZE = 1_000
 CHUNK_OVERLAP = 150
@@ -29,6 +35,31 @@ class RAGState(TypedDict):
     question: str
     documents: list[Document]
     answer: str
+
+
+class OpenAIEmbeddingAdapter(Embeddings):
+    """Expose OpenAI embeddings through LangChain's embedding interface."""
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+        self.api_key = os.environ["OPENAI_API_KEY"]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self._embed(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed([text])[0]
+
+    def _embed(self, texts: list[str]) -> list[list[float]]:
+        response = requests.post(
+            "https://api.openai.com/v1/embeddings",
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            json={"model": self.model, "input": texts},
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = sorted(response.json()["data"], key=lambda item: item["index"])
+        return [item["embedding"] for item in data]
 
 
 def load_manifest_metadata() -> dict[str, dict]:
@@ -53,16 +84,25 @@ def load_manifest_metadata() -> dict[str, dict]:
 def load_and_split_documents() -> list[Document]:
     metadata_by_filename = load_manifest_metadata()
     pages: list[Document] = []
+    pdf_paths = sorted(SOURCE_DIRECTORY.glob("*.pdf"))
+    pdf_limit = int(os.getenv("COATING_COMPASS_PDF_LIMIT", "0"))
+    if pdf_limit > 0:
+        pdf_paths = pdf_paths[:pdf_limit]
 
-    for pdf_path in sorted(SOURCE_DIRECTORY.glob("*.pdf")):
+    for pdf_path in pdf_paths:
         source_metadata = metadata_by_filename[pdf_path.name]
-        loaded_pages = PyMuPDFLoader(str(pdf_path)).load()
-
-        for page in loaded_pages:
-            page.metadata.update(source_metadata)
-            page.metadata["source_filename"] = pdf_path.name
-            page.metadata["page_number"] = int(page.metadata.get("page", 0)) + 1
-            pages.append(page)
+        pdf = PdfReader(pdf_path)
+        for page_index, pdf_page in enumerate(pdf.pages):
+            pages.append(
+                Document(
+                    page_content=(pdf_page.extract_text() or "").strip(),
+                    metadata={
+                        **source_metadata,
+                        "source_filename": pdf_path.name,
+                        "page_number": page_index + 1,
+                    },
+                )
+            )
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
@@ -85,27 +125,40 @@ def chunk_id(document: Document, embedding_model: str) -> str:
             document.page_content,
         ]
     )
-    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return str(uuid.UUID(digest[:32]))
 
 
-def build_vector_store() -> Chroma:
+def build_vector_store() -> QdrantVectorStore:
     embedding_model = os.getenv(
-        "COATING_COMPASS_EMBEDDING_MODEL", "gemini-embedding-2"
+        "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
     )
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model=embedding_model,
-        output_dimensionality=768,
-    )
-    vector_store = Chroma(
+    embeddings = OpenAIEmbeddingAdapter(model=embedding_model)
+    VECTOR_STORE_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    client = QdrantClient(path=str(VECTOR_STORE_DIRECTORY))
+    if not client.collection_exists(COLLECTION_NAME):
+        client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(
+                size=EMBEDDING_DIMENSIONS,
+                distance=Distance.COSINE,
+            ),
+        )
+    vector_store = QdrantVectorStore(
+        client=client,
         collection_name=COLLECTION_NAME,
-        embedding_function=embeddings,
-        persist_directory=str(VECTOR_STORE_DIRECTORY),
-        collection_metadata={"hnsw:space": "cosine"},
+        embedding=embeddings,
     )
 
     chunks = load_and_split_documents()
     chunk_ids = [chunk_id(chunk, embedding_model) for chunk in chunks]
-    existing_ids = set(vector_store.get(ids=chunk_ids, include=[])["ids"])
+    existing_points = client.retrieve(
+        collection_name=COLLECTION_NAME,
+        ids=chunk_ids,
+        with_payload=False,
+        with_vectors=False,
+    )
+    existing_ids = {str(point.id) for point in existing_points}
 
     missing_chunks = [
         chunk for chunk, identifier in zip(chunks, chunk_ids, strict=True)
@@ -122,7 +175,7 @@ def build_vector_store() -> Chroma:
     return vector_store
 
 
-def create_rag_graph(vector_store: Chroma):
+def create_rag_graph(vector_store: QdrantVectorStore):
     retriever = vector_store.as_retriever(
         search_type="similarity",
         search_kwargs={"k": RETRIEVAL_K},
@@ -182,8 +235,12 @@ def create_rag_graph(vector_store: Chroma):
 
 
 def main() -> None:
+    truststore.inject_into_ssl()
     load_dotenv()
     vector_store = build_vector_store()
+    if os.getenv("COATING_COMPASS_INGEST_ONLY") == "1":
+        print("Ingest-only run complete.")
+        return
     rag_graph = create_rag_graph(vector_store)
 
     print("Coating Compass basic RAG is ready. Type 'quit' to exit.")
