@@ -9,12 +9,14 @@ AGENTS.md
 
 # Virtual environments
 .venv
+.deepeval/
 
 .env
 
 # Generated knowledge-base artifacts
 data/processed/
 data/vector_store/
+data/evaluations/results/
 
 Coating_Compass_Project_Brief.md
 
