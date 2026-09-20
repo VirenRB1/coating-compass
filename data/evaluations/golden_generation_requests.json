@@ -1,0 +1,161 @@
+[
+  {
+    "case_id": "manual_001",
+    "question": "Can I use a Dulux lifemaster primer on my exterior wood surface before painting with Dulux Weatherguard paint",
+    "pdf_filenames": [
+      "13_Dulux_Lifemaster_Interior_Primer_59113_01_TDS.pdf",
+      "12_Dulux_Gripper_Interior_Exterior_Primer_60000A_01_TDS.pdf",
+      "09_Dulux_Weatherguard_Exterior_1530_01_TDS.pdf",
+      "11_Dulux_Weatherguard_Exterior_Primer_1535_01_TDS.pdf"
+    ],
+    "answer_guidance": "Determine whether the primer is approved for exterior wood, then give a supported primer and topcoat recommendation using only the selected TDS documents. Include important preparation or limitation details needed to avoid a misleading answer. A correct answer here should be how the lifemaster primer is an interior primer and not suitable for exterior wood, and recommend the appropriate exterior primer (like Dulux Gripper or Weatherguard Exterior Primer) for use with Dulux Weatherguard paint. But extract this information only from the provided TDS documents, and do not include any information from outside sources."
+  },
+  {
+    "case_id": "manual_002",
+    "question": "I want to paint my interior cabinets and some furniture. Recommend me a suitable paint for this task. I would like a paint that is really durable and easy to clean and also has self-leveling properties.",
+    "pdf_filenames": ["06_Dulux_XPERT_Waterborne_Alkyd_22010_01_TDS.pdf"],
+    "answer_guidance": "Use only the Dulux X-PERT Waterborne Alkyd 22010 TDS. Recommend it for supported interior cabinets and furniture and connect the recommendation to its documented alkyd-emulsion durability, superior levelling, block resistance, quick drying, low odour, and soap-and-water cleanup. Preserve the required preparation and system details from the sheet rather than treating it as a direct-to-any-surface coating: the surface must be clean, dry, sound, and properly prepared, and the documented primer system must be followed for previously painted or new substrates. Include the recommended two topcoats and relevant drying, application-temperature, and before-cleaning limitations. Do not describe the product as suitable for floors or exterior use, and do not turn superior levelling into a guarantee that application technique does not matter."
+  },
+  {
+    "case_id": "manual_003",
+    "question": "I am painting my bathroom and want to use a paint that is moisture-resistant and easy to clean. It should also contain mould and mildew resistance. If some paint remains I can also use it for my kitchen walls.",
+    "pdf_filenames": ["05_Dulux_Kitchen_and_Bath_18010A_01_TDS.pdf"],
+    "answer_guidance": "Use only the Dulux Kitchen & Bath 18010A TDS. Recommend the product for supported bathroom and kitchen walls and connect the recommendation to its intended kitchen-and-bath use, EZ Clean stain resistance, acrylic formulation, and mildew-resistant dry paint film. Preserve the distinction between resisting mildew growth on the paint film and eliminating existing mildew: existing mildew and contaminants must be removed and the surface prepared as directed before painting. Include relevant primer decisions for the stated substrate only if known; otherwise state what substrate or existing-coating information is needed. Mention two recommended topcoats, drying/recoat and 30-day cleaning-cure conditions where helpful. Preserve the explicit limitation against prolonged water-contact areas such as shower stalls, saunas, and steam rooms, and do not describe the coating as waterproof."
+  },
+  {
+    "case_id": "manual_004",
+    "question": "I am painting a high traffic area and need a paint that is durable and easy to maintain. The paint needs to be able to withstand frequent cleaning and wear. It needs to be highly scuff-resistant. It also needs to provide high hiding capabilities since I am painting over a dark surface.",
+    "pdf_filenames": ["07_Dulux_Anti_Scuff_Interior_55110_01_TDS.pdf"],
+    "answer_guidance": "Use only the Dulux Anti-Scuff Interior 55110 TDS. Recommend it for a supported interior high-traffic wall because the sheet documents unrivalled scuff resistance, high hiding, great coverage, excellent touch-up, and a smooth finish. Explain that high hiding does not guarantee one-coat coverage over a dark colour: the TDS says some colours, drastic colour changes, or porous substrates may require more than one coat for a uniform finish. Include proper cleaning, repair, sanding, and priming of bare or porous surfaces. Preserve the 30-day full cure and the instruction to wait at least 30 days before cleaning with a non-abrasive mild cleanser. Do not recommend it for floors, saturating humidity, or submerged surfaces."
+  },
+  {
+    "case_id": "manual_005",
+    "question": "I want to paint my ceiling which has got a lot of stains. I want to cover them with a paint that is easy to apply and provides good coverage. It also needs to provide high hiding capabilities. It needs to be zero VOC and also have mildew resistance.",
+    "pdf_filenames": ["17_Dulux_Lifemaster_Interior_Ceiling_Flat_59170_01_TDS.pdf"],
+    "answer_guidance": "Use only the Dulux Lifemaster Interior Ceiling Flat 59170 TDS. Identify the product as a supported ceiling finish and connect it to the documented excellent hiding, excellent touch-up, fast drying, zero-VOC base paint, low odour, and mildew-resistant paint film. Preserve the qualification that colourants may significantly increase VOC depending on colour choice. Do not claim that the ceiling paint itself is a stain-blocking primer: the sheet requires appropriate priming of bare surfaces, repaired areas, alkyd coatings, and other relevant conditions, and the supplied document does not establish a specific severe-stain-blocking system. Require the surface to be clean and dry and stains or their causes to be addressed before coating. State that two topcoats are recommended and preserve the application temperature, drying, and 30-day before-cleaning information where relevant."
+  },
+  {
+    "case_id": "manual_006",
+    "question": "I need an interior and exterior primer for painting my new drywall and then I can also use the same primer for painting my exterior wooden surfaces.",
+    "pdf_filenames": ["12_Dulux_Gripper_Interior_Exterior_Primer_60000A_01_TDS.pdf"],
+    "answer_guidance": "Use only the Dulux Gripper 60000A TDS. Recommend Gripper as one primer documented for both interior and exterior use, including new drywall and exterior wood. Explain the required preparation: surfaces must be clean and dry, contaminants and loose coating removed, damaged areas repaired, and bare wood sanded smooth and cleaned before priming. Preserve the tannin-bleeding wood requirement for two coats and the 24-hour drying condition between those primer coats for optimum blocking. State that Gripper must be covered with an appropriate topcoat and is not a finish coat. Include relevant application temperatures, weather restrictions, recoat time, and lead/dry-sanding warnings without implying that all exterior wood conditions are identical."
+  },
+  {
+    "case_id": "manual_007",
+    "question": "I am painting my floors which receive a lot of foot traffic. What is the best interior and exterior paint for this application? It will go on concrete floors and I need a product that will be long lasting for this application.",
+    "pdf_filenames": ["08_Dulux_Water_based_Floor_Enamel_247010_01_TDS.pdf"],
+    "answer_guidance": "Use only the Dulux Water-based Floor Enamel 247010 TDS. Recommend it for supported interior or exterior concrete floors and high-traffic areas based on its documented polyurethane-acrylic durability, adhesion, weather resistance, and intended uses such as basement floors, patios, steps, porches, and laundry rooms. Require concrete or masonry to be completely dry, free of efflorescence, and cured for 30 days, with all contaminants and loose coating removed. State that no primer is required for new concrete or properly prepared previously painted latex concrete floors and that two topcoats are recommended. Preserve the 10°C-to-32°C application range, 4-to-6-hour recoat time, and 14-day full cure before cleaning. Clearly state that it is not recommended for garages or areas exposed to vehicle tires and is not intended for prolonged water contact. Do not interpret high traffic as including vehicle traffic."
+  },
+  {
+    "case_id": "manual_008",
+    "question": "I am painting the exterior wood siding on my house. The existing coating is faded and parts of the surface are weathered. I need a durable exterior paint that can withstand Canadian weather. What preparation, primer, and topcoat should I use?",
+    "pdf_filenames": [
+      "10_Dulux_Diamond_Exterior_16330_01_TDS.pdf",
+      "09_Dulux_Weatherguard_Exterior_1530_01_TDS.pdf"
+    ],
+    "answer_guidance": "Use only the two selected exterior-paint TDS documents. Explain that the substrate must be clean and dry; loose or peeling paint, dirt, grease, chalk, and other contaminants must be removed; glossy, rough, and patched areas must be sanded; and moisture problems must be corrected before painting. Distinguish the primer decision by actual surface condition instead of assuming that all faded or weathered siding is bare wood: previously painted latex in good condition does not require primer, aged alkyd calls for Dulux Gripper 60000A, bare wood calls for Dulux Weatherguard 1535, and tannin-staining wood calls for Dulux Gripper 60000A. Present Dulux Diamond Exterior 16330 and Dulux Weatherguard Exterior 1530 as supported topcoat options and compare only properties documented in these sheets, such as Diamond's high-build hide, dirt and UV resistance, mould/fungus resistance, and 2°C minimum application temperature versus Weatherguard's weather resistance, colour retention, moisture resistance, and 4°C minimum application temperature. State that two topcoats are recommended and preserve the limitations and weather conditions that materially affect this project. Do not claim that one product is universally best when both documents support the application."
+  },
+  {
+    "case_id": "manual_009",
+    "question": "I want to paint my exterior siding in early spring. The daytime temperature will be around 3°C, and rain may arrive approximately 36 hours after I finish. Can I proceed with the project, and which exterior paint would be suitable?",
+    "pdf_filenames": ["10_Dulux_Diamond_Exterior_16330_01_TDS.pdf"],
+    "answer_guidance": "Use only the Dulux Diamond Exterior 16330 TDS. Explain that this product is documented for properly prepared exterior siding and permits application when air, surface, and product temperatures are between 2°C and 32°C, at least 3°C above the dew point, with temperatures remaining in that range for the next 24 hours. Recognize that 3°C meets the stated minimum only if all of those additional temperature and dew-point conditions are satisfied. However, clearly advise that the described project should not proceed because the TDS says not to apply if rain or snow is expected within 48 hours, and rain is forecast after approximately 36 hours. Mention that low-temperature drying takes longer and that at 2°C the minimum recoat time is 24 hours. Do not treat meeting the minimum air temperature as sufficient when the precipitation restriction is not met."
+  },
+  {
+    "case_id": "manual_010",
+    "question": "While applying Dulux Water-based Floor Enamel, some product splashed into my eyes and I also inhaled some spray mist. What immediate first-aid steps should I take?",
+    "pdf_filenames": ["08_Dulux_Water_based_Floor_Enamel_247010_01_SDS.pdf"],
+    "answer_guidance": "Use only the Dulux Water-based Floor Enamel 247010/01 SDS, especially Section 4. For eye exposure, instruct the person to avoid concurrent sunlight or other UV exposure, immediately flush the eyes with plenty of water while occasionally lifting both eyelids, remove contact lenses if present and easy to remove, continue rinsing for at least 10 minutes, and obtain medical attention. For inhalation, instruct the person to move to fresh air and rest in a position comfortable for breathing; preserve the SDS directions for irregular or stopped breathing, unconsciousness, maintaining an open airway, and obtaining medical attention without adding unsupported treatment. Include the SDS's general direction to contact a poison control centre, emergency room, or physician immediately if overexposure or symptoms occur or persist, and to have the SDS available. Keep the response focused on immediate first aid and do not substitute general paint advice or information from another product."
+  },
+  {
+    "case_id": "manual_011",
+    "question": "I am repainting the walls of an occupied bedroom and want to minimize disruption. I need a low-odour, zero-VOC paint that dries reasonably quickly and provides a durable, washable finish. Which product should I use, and are there any important application or curing limitations?",
+    "pdf_filenames": ["03_Dulux_Lifemaster_Interior_59311A_01_TDS.pdf"],
+    "answer_guidance": "Use only the Dulux Lifemaster Interior 59311A TDS. Identify Lifemaster Interior as suitable for properly prepared interior walls and explain why its documented low odour, zero-VOC base paint, excellent washability, adhesion, high hiding, and stain resistance fit an occupied bedroom. Preserve the qualification that added colourants may significantly increase the VOC level, so do not describe every tinted version as unconditionally zero VOC. Include the documented drying conditions: touch dry in 30 minutes, recoat in 2 to 4 hours at 25°C and 50% relative humidity, double the required time above 50% relative humidity, and wait 30 days before cleaning. State that application temperatures must be between 10°C and 32°C. Mention appropriate preparation and primer decisions only as supported by the TDS, and note that two topcoats are recommended for better durability and appearance. Do not claim that quick touch-drying means the coating is immediately washable or fully cured."
+  },
+  {
+    "case_id": "manual_012",
+    "question": "I am repainting previously painted latex walls in a rental unit. The walls are in good condition, but I want reasonable durability, washability, and good hiding without unnecessary priming. Which interior paint options should I compare, and what are the important differences between them?",
+    "pdf_filenames": [
+      "04_Dulux_Diamond_Interior_151100_01_TDS.pdf",
+      "03_Dulux_Lifemaster_Interior_59311A_01_TDS.pdf"
+    ],
+    "answer_guidance": "Use only the Dulux Diamond Interior 151100 and Dulux Lifemaster Interior 59311A TDS documents. Explain that both are supported for properly prepared interior walls and that neither requires primer over previously painted latex surfaces in good condition; both sheets recommend two topcoats for better durability and appearance. Compare only documented properties. For Diamond, cover paint-and-primer-in-one hiding and coverage, stain blocking, exceptional durability, scrub resistance, burnish resistance, flow and levelling, and a smooth finish. For Lifemaster, cover high hiding, extreme washability, adhesion, oil and stain resistance, low odour, suitability for occupied spaces, minimal spatter, and a uniform finish. Preserve that both are zero-VOC base paints but added colourants may significantly increase VOC depending on colour choice. Note that both list 30-minute touch dry, 2-to-4-hour recoat, 30 days before cleaning, and application from 10°C to 32°C. Do not invent a price or claim that one is universally superior; connect Diamond to projects prioritizing maximum scrub/burnish resistance and Lifemaster to occupied spaces and documented washability/low odour, while presenting both as acceptable choices for the described walls."
+  },
+  {
+    "case_id": "manual_013",
+    "question": "I have leftover exterior wall paint and want to use it on my wooden deck floor because it already withstands outdoor weather. Is that suitable, or should I use a different product?",
+    "pdf_filenames": [
+      "10_Dulux_Diamond_Exterior_16330_01_TDS.pdf",
+      "09_Dulux_Weatherguard_Exterior_1530_01_TDS.pdf"
+    ],
+    "answer_guidance": "Use only the Dulux Diamond Exterior 16330 and Dulux Weatherguard Exterior 1530 TDS documents. Clearly reject both products for the wooden deck floor even though they are exterior paints. Cite the documented limitations: Diamond Exterior is not for roofs, floors, or patios, and Weatherguard Exterior is not formulated for roofs, floors, or decks. Explain that weather resistance on supported vertical exterior surfaces does not establish suitability for a horizontal walking surface. Because no suitable floor or deck coating document is supplied in this case, do not invent or name a replacement product; state that a product specifically documented for an exterior wooden deck or floor must be selected and that the present evidence does not establish one."
+  },
+  {
+    "case_id": "manual_014",
+    "question": "I plan to apply two coats of Dulux X-PERT Interior paint to 1,000 square feet of previously painted interior walls. Approximately how many 3.78-litre cans should I plan for, and what could cause me to need more paint?",
+    "pdf_filenames": ["02_Dulux_XPERT_Interior_14010A_01_TDS.pdf"],
+    "answer_guidance": "Use only the Dulux X-PERT Interior 14010A/01 TDS. Show the estimate transparently from the documented practical coverage range of 380 to 420 square feet per 3.78 litres for one coat. Use the midpoint of that range, 400 square feet per can per coat. For two coats, one can has an estimated effective coverage of 200 square feet of wall area, so 1,000 divided by 200 equals approximately five 3.78-litre cans. Make clear that this is a planning estimate rather than a guarantee. Preserve any TDS caveats that can increase consumption or the number of coats, including surface irregularities or porosity, application losses, and any documented effect of drastic colour changes or particular colours. Do not use the high end of the range as a guaranteed yield, and do not omit that the coverage figure is per coat."
+  },
+  {
+    "case_id": "manual_015",
+    "question": "My interior walls have an old alkyd/oil-based coating that is still in good condition. Can I apply a water-based interior paint directly over it, or do I need a primer? Please recommend a supported system.",
+    "pdf_filenames": [
+      "01_Dulux_Ultra_Interior_949000_01_TDS.pdf",
+      "02_Dulux_XPERT_Interior_14010A_01_TDS.pdf",
+      "03_Dulux_Lifemaster_Interior_59311A_01_TDS.pdf",
+      "04_Dulux_Diamond_Interior_151100_01_TDS.pdf",
+      "05_Dulux_Kitchen_and_Bath_18010A_01_TDS.pdf",
+      "06_Dulux_XPERT_Waterborne_Alkyd_22010_01_TDS.pdf",
+      "07_Dulux_Anti_Scuff_Interior_55110_01_TDS.pdf",
+      "12_Dulux_Gripper_Interior_Exterior_Primer_60000A_01_TDS.pdf"
+    ],
+    "answer_guidance": "Use only the selected interior-paint TDS documents and the Dulux Gripper 60000A TDS. Do not recommend applying an ordinary water-based interior topcoat directly over the existing alkyd coating. Explain that the interior TDS documents either identify aged alkyd as unsupported for direct application or require an appropriate bonding/transition primer; their system recommendations repeatedly identify Gripper 60000A as a supported primer beneath products such as Ultra, X-PERT Interior, Lifemaster, Diamond Interior, and Kitchen & Bath. Require cleaning and proper preparation, and preserve the Gripper instruction that glossy finishes and alkyd paint must be dulled by sanding with fine 100-to-120-grit sandpaper followed by removal of sanding residue. Recommend one full coat of Gripper 60000A where supported, followed by a selected compatible interior topcoat according to that topcoat's TDS. Some sheets also reference X-PERT Waterborne Alkyd Primer/Sealer 23010, but its TDS is not included in this knowledge collection; therefore, within the supplied evidence, use Gripper as the fully documented primer system and do not invent specifications for 23010. Preserve sanding/lead-dust safety warnings where relevant, and do not claim that every listed interior product has identical substrate limitations."
+  },
+  {
+    "case_id": "manual_016",
+    "question": "My exterior concrete wall was poured 10 days ago and appears dry. I want to prime it now before the weather changes. Can I proceed, and which of the available exterior primers could be used once the surface is ready?",
+    "pdf_filenames": [
+      "11_Dulux_Weatherguard_Exterior_Primer_1535_01_TDS.pdf",
+      "12_Dulux_Gripper_Interior_Exterior_Primer_60000A_01_TDS.pdf"
+    ],
+    "answer_guidance": "Use only the Dulux Weatherguard Exterior Primer 1535 and Dulux Gripper 60000A TDS documents. State clearly that the wall must not be primed after only 10 days: both sheets require new concrete or masonry to age at least 30 days and be thoroughly dry. For Gripper, also preserve the requirement that the substrate pH be 13 or lower. Explain the shared preparation requirement that the surface be clean, dry, and free of contaminants, loose material, or other conditions identified in the sheets. Once the curing and preparation requirements are met, identify both primers as documented exterior options for concrete or masonry: Weatherguard 1535 is an exterior acrylic, alkali-resistant primer intended for new concrete, stucco, and masonry, while Gripper is an interior/exterior universal acrylic primer-sealer with concrete and masonry in its supported surfaces. Include relevant application conditions, particularly the prohibition on application if rain, snow, or heavy dew is expected within 48 hours. Do not infer that a surface is adequately cured merely because it looks dry, and do not recommend a specific topcoat because no topcoat TDS is supplied in this case."
+  },
+  {
+    "case_id": "manual_017",
+    "question": "I need to prime an unpainted exterior galvanized-metal surface before applying a compatible topcoat. Can I use Dulux Gripper, or should I use a different primer?",
+    "pdf_filenames": [
+      "11_Dulux_Weatherguard_Exterior_Primer_1535_01_TDS.pdf",
+      "12_Dulux_Gripper_Interior_Exterior_Primer_60000A_01_TDS.pdf"
+    ],
+    "answer_guidance": "Use only the Dulux Weatherguard Exterior Primer 1535 and Dulux Gripper 60000A TDS documents. Clearly state that Gripper 60000A must not be used over galvanized metal because its limitations explicitly exclude that substrate. Preserve Gripper's system recommendation directing unpainted exterior galvanized metal to Dulux 1535 Exterior 100% Acrylic Primer. Identify Weatherguard 1535 as the supported choice because its intended uses include galvanized metal and it carries the corresponding water-based galvanized-primer certification. Include relevant preparation from the Weatherguard sheet: the surface must be clean, dry, and free of dirt, chalk, grease, wax, rust, and loose or peeling coating. State the relevant exterior application restrictions, including temperatures above 4°C, avoiding direct sunlight, and no rain, snow, or heavy dew expected within 48 hours. Recommend a compatible appropriate topcoat only generically because a topcoat TDS is not supplied; do not invent a particular topcoat system."
+  },
+  {
+    "case_id": "manual_018",
+    "question": "Since Dulux Kitchen & Bath paint resists moisture and mildew, can I use it inside a shower stall or steam room where the walls are regularly exposed to water and steam?",
+    "pdf_filenames": ["05_Dulux_Kitchen_and_Bath_18010A_01_TDS.pdf"],
+    "answer_guidance": "Use only the Dulux Kitchen & Bath 18010A TDS. Clearly answer no for a shower stall or steam room. Explain that although the product is intended for kitchens, bathrooms, and high-traffic areas and is formulated to resist mildew growth on the dry paint film, the TDS explicitly excludes surfaces subjected to prolonged water contact and specifically lists shower stalls, saunas, and steam rooms. Distinguish mildew resistance of the paint film from waterproofing or suitability for continuously wet or steam-saturated enclosures. Do not let the general bathroom-use statement override the more specific limitation, and do not name an alternative coating because no supporting product document is supplied."
+  },
+  {
+    "case_id": "manual_019",
+    "question": "I have interior walls with old water stains, marker marks, and some smoke staining. The surfaces are dry and the source of the water damage has been repaired. What preparation, primer, and topcoat system should I use to prevent the stains from bleeding through?",
+    "pdf_filenames": [
+      "11_Dulux_Weatherguard_Exterior_Primer_1535_01_TDS.pdf",
+      "12_Dulux_Gripper_Interior_Exterior_Primer_60000A_01_TDS.pdf",
+      "13_Dulux_Lifemaster_Interior_Primer_59113_01_TDS.pdf",
+      "14_Dulux_XPERT_Interior_Primer_11000_01_TDS.pdf",
+      "15_Dulux_Ultra_Classic_Interior_Primer_36600_36600_01_TDS.pdf",
+      "04_Dulux_Diamond_Interior_151100_01_TDS.pdf"
+    ],
+    "answer_guidance": "Use only the five selected primer TDS documents and the Dulux Diamond Interior 151100 TDS. Compare the primer evidence and select Dulux Gripper 60000A for this case because its TDS explicitly describes it as an interior/exterior stain blocker and specifically lists water, smoke, ink, and marker stains. Do not select Weatherguard 1535 merely because it has a stain-blocking certification; its documented stain discussion is oriented to tannin-staining exterior wood, whereas this is an interior wall with water, marker, and smoke stains. Require the wall to be clean, dry, free of contaminants and loose coating, repaired as needed, with rough or glossy areas properly sanded and sanding residue removed. State that the moisture source must be corrected and the surface dry before coating, as provided in the question. Recommend one full coat of Gripper, while preserving the TDS warning that severe or aggressive stains may require a second primer coat to prevent bleed-through. After the primer is ready for recoating under its documented conditions, recommend Dulux Diamond Interior as the topcoat and preserve its recommendation for two topcoats for better durability and appearance. Do not imply that the ordinary drywall primers have the same explicit water/smoke/marker blocking support, and do not guarantee stain blocking regardless of severity or preparation."
+  },
+  {
+    "case_id": "manual_020",
+    "question": "I am repainting a room in an older home where the existing finish is Dulux Diamond Interior, but some areas may have older coating layers underneath. The paint is peeling, so I planned to dry-sand it aggressively before priming and painting. Are there important safety precautions or changes I should make before starting?",
+    "pdf_filenames": [
+      "04_Dulux_Diamond_Interior_151100_01_TDS.pdf",
+      "04_Dulux_Diamond_Interior_151100_01_SDS.pdf"
+    ],
+    "answer_guidance": "Use only the Dulux Diamond Interior 151100 TDS and SDS. Advise against beginning aggressive dry sanding without appropriate hazard controls. Preserve the TDS statement that dry sanding can generate dust and hazardous fumes and requires suitable respiratory protection, as well as its warning that scraping, sanding, or removing old paint may release toxic lead dust and that a regional Health Canada office should be contacted for more information. Because the home may contain unknown older coating layers, do not assume that identifying the visible finish as Diamond rules out lead or other hazards underneath. From the SDS, explain that sanding the cured coating may be harmful depending on exposure duration and level, and that dust-generating work calls for engineering controls such as local exhaust ventilation to keep airborne contaminants below applicable limits. Preserve the need for task-appropriate eye, skin, and respiratory protection selected through a proper risk assessment, with respirators used under an appropriate fitting and training program. Keep the answer practical but do not invent a lead-testing method, exposure limit, removal procedure, or certification requirement that is not present in the supplied documents; recommend obtaining appropriate professional or regulatory guidance before disturbing potentially hazardous old coatings."
+  }
+]

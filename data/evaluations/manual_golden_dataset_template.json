@@ -1,0 +1,22 @@
+[
+  {"question": "Can I use a Dulux lifemaster primer on my exterior wood surface before painting with Dulux Weatherguard paint", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_02>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_03>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_04>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_05>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_06>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_07>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_08>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_09>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_10>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_11>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_12>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_13>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_14>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_15>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_16>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_17>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_18>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_19>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null},
+  {"question": "<QUESTION_20>", "expected_context": [], "expected_answer": "", "retrieved_context": [], "actual_answer": null}
+]
