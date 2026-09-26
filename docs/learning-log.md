@@ -42,6 +42,27 @@ The second command uses hosted models and should run only with cost approval.
 
 Explain why faithfulness can be high while answer correctness is low.
 
+## 2026-09-26 — Fetching a versioned Langfuse prompt
+
+### In my own words
+
+A Langfuse prompt version is immutable, while a label is a movable pointer to one
+version. Fetching by the `baseline` label lets the application identify the reviewed
+baseline without hard-coding a numeric version.
+
+### Current boundary
+
+The prompt registry can fetch and validate the registered text prompt, but the RAG
+graph does not consume it yet. Keeping retrieval separate from activation makes this
+change easy to test and prevents a remote prompt from silently changing application
+behavior in this increment.
+
+### Common failure mode
+
+`uv --system-certs` affects dependency downloads, not runtime HTTP clients. The
+Langfuse fetch path injects the Windows trust store for networks with a private TLS
+issuer and never disables certificate verification.
+
 ## 2026-09-26 — Reasoning tokens and empty answers
 
 ### In my own words

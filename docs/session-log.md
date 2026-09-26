@@ -2,6 +2,10 @@
 
 ## 2026-09-26
 
+- Registered version 1 of `coating_compass_baseline_prompt` in Langfuse with the
+  `baseline` label. Added a tested prompt-registry boundary that fetches that label,
+  validates text content, and exposes prompt/version/config metadata without yet
+  changing the RAG graph's runtime prompt.
 - Goal: add a reference-inspired full-pipeline DeepEval evaluation.
 - Added a seven-metric suite under `src/evals/application_evals/`.
 - Added GEval rubrics for answer simplicity and answer correctness.
