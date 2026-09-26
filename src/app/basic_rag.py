@@ -29,6 +29,7 @@ EMBEDDING_DIMENSIONS = 1_536
 CHUNK_SIZE = 1_000
 CHUNK_OVERLAP = 150
 RETRIEVAL_K = 5
+DEFAULT_GENERATOR_MAX_TOKENS = 2_000
 
 
 class RAGState(TypedDict):
@@ -129,6 +130,33 @@ def chunk_id(document: Document, embedding_model: str) -> str:
     return str(uuid.UUID(digest[:32]))
 
 
+def generator_model_config() -> dict:
+    """Return validated, reproducible settings for the hosted answer model."""
+
+    model = os.getenv("COATING_COMPASS_GROQ_MODEL", "openai/gpt-oss-20b")
+    max_tokens = int(
+        os.getenv(
+            "COATING_COMPASS_GENERATOR_MAX_TOKENS",
+            str(DEFAULT_GENERATOR_MAX_TOKENS),
+        )
+    )
+    if max_tokens < 1:
+        raise ValueError("COATING_COMPASS_GENERATOR_MAX_TOKENS must be positive.")
+
+    config = {
+        "model": model,
+        "temperature": 0,
+        "max_tokens": max_tokens,
+        "timeout": 30,
+        "max_retries": 2,
+    }
+    if model.startswith("openai/gpt-oss-"):
+        config["reasoning_effort"] = os.getenv(
+            "COATING_COMPASS_GENERATOR_REASONING_EFFORT", "low"
+        )
+    return config
+
+
 def build_vector_store() -> QdrantVectorStore:
     embedding_model = os.getenv(
         "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
@@ -180,13 +208,7 @@ def create_rag_graph(vector_store: QdrantVectorStore):
         search_type="similarity",
         search_kwargs={"k": RETRIEVAL_K},
     )
-    model = ChatGroq(
-        model=os.getenv("COATING_COMPASS_GROQ_MODEL", "openai/gpt-oss-20b"),
-        temperature=0,
-        max_tokens=700,
-        timeout=30,
-        max_retries=2,
-    )
+    model = ChatGroq(**generator_model_config())
     prompt = ChatPromptTemplate.from_messages(
         [
             (

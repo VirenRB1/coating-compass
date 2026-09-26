@@ -24,6 +24,11 @@ Judge reasons must be reviewed, and later coating-specific validation should cov
 SKU validity, citations, warnings, clarifications, compatible systems, and expected
 abstention.
 
+The generator configuration is part of the experiment identity. Follow-up artifacts
+record the output-token budget and reasoning effort. The targeted empty-output fix
+uses 2,000 output tokens and low GPT-OSS reasoning effort; the original baseline used
+700 tokens and the provider's default medium effort.
+
 ## Reproduction
 
 The evaluation makes hosted model calls and may spend paid API credits. Obtain owner
@@ -51,6 +56,9 @@ uv run python -m src.evals.application_evals.evaluate_full_pipeline --label base
 Use `--limit 1` only for an approved smoke run. The output records the golden-set
 hash, model names, collection, retrieval count, label, timestamp, per-case scores,
 judge reasons, generated answers, and retrieved evidence.
+
+Use `--case-id manual_002` to evaluate a targeted case without rerunning the other
+goldens. Repeat the flag to select multiple cases.
 
 For example, the full baseline with four workers is:
 

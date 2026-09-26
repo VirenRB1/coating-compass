@@ -40,3 +40,15 @@
   dataset-generation code under `src/data/`, application code under `src/app/`, and
   evaluation code under `src/evals/`. Added working README commands and replaced the
   placeholder root entry point with the baseline application entry point.
+- Diagnosed the empty GPT-OSS output for `manual_002` as an undersized 700-token
+  completion budget combined with the provider's default medium reasoning effort.
+  Added validated, environment-configurable settings that default to 2,000 tokens and
+  low reasoning effort, recorded them in evaluation artifacts, and added targeted
+  `--case-id` evaluation so the remaining 19 cases need not be rerun.
+- Ran only `manual_002` under label `generator-output-fix`. The generator returned
+  2,652 characters instead of an empty answer, confirming the output-budget fix.
+  The case completed all seven metrics: recall 0.375, precision 0.888, contextual
+  relevancy 0.625, answer relevancy 1.000, faithfulness 1.000, simplicity 0.900,
+  and correctness 0.700. Retrieval still missed the intended X-PERT 22010 evidence,
+  so product selection remains a separate retrieval problem rather than a generator
+  availability failure.

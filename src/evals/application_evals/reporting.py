@@ -48,6 +48,8 @@ def write_markdown_report(output_path: Path, result: dict[str, Any]) -> None:
         f"- Retrieval K: `{run['retrieval_k']}`",
         f"- Embedding model: `{run['embedding_model']}`",
         f"- Generator model: `{run['generator_model']}`",
+        f"- Generator max tokens: `{run.get('generator_max_tokens', 'not recorded')}`",
+        f"- Generator reasoning effort: `{run.get('generator_reasoning_effort', 'not recorded')}`",
         f"- Judge model: `{run['judge_model']}`",
         f"- Parallel case workers: `{run['workers']}`",
         f"- Per-metric timeout: `{run['metric_timeout_seconds']} seconds`",

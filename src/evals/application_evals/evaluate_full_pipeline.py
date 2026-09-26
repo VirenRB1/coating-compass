@@ -27,6 +27,7 @@ from src.app.basic_rag import (
     RETRIEVAL_K,
     build_vector_store,
     create_rag_graph,
+    generator_model_config,
 )
 from src.evals.application_evals.metrics import build_full_pipeline_metrics
 from src.evals.application_evals.reporting import (
@@ -45,6 +46,11 @@ def parse_args() -> argparse.Namespace:
         description="Evaluate retrieval and generation across the full RAG pipeline."
     )
     parser.add_argument("--label", default="baseline")
+    parser.add_argument(
+        "--case-id",
+        action="append",
+        help="Evaluate only this manual_NNN case ID. Repeat to select more than one.",
+    )
     parser.add_argument(
         "--limit",
         type=int,
@@ -213,8 +219,19 @@ def main() -> None:
     truststore.inject_into_ssl()
     load_dotenv()
     goldens = validate_goldens(json.loads(GOLDENS_PATH.read_text(encoding="utf-8")))
-    if args.limit is not None:
-        goldens = goldens[: args.limit]
+    indexed_goldens = list(enumerate(goldens, start=1))
+    selected_ids = set(args.case_id or [])
+    if selected_ids:
+        indexed_goldens = [
+            (index, golden)
+            for index, golden in indexed_goldens
+            if f"manual_{index:03d}" in selected_ids
+        ]
+        found_ids = {f"manual_{index:03d}" for index, _ in indexed_goldens}
+        if missing_ids := selected_ids - found_ids:
+            raise ValueError(f"Unknown case IDs: {sorted(missing_ids)}")
+    elif args.limit is not None:
+        indexed_goldens = indexed_goldens[: args.limit]
 
     judge_model = os.getenv(
         "COATING_COMPASS_EVALUATION_MODEL", "gpt-5-mini-2025-08-07"
@@ -223,6 +240,7 @@ def main() -> None:
         "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
     )
     generator_model = os.getenv("COATING_COMPASS_GROQ_MODEL", "openai/gpt-oss-20b")
+    generator_config = generator_model_config()
     vector_store = build_vector_store()
     rag_graph = create_rag_graph(vector_store)
 
@@ -239,7 +257,7 @@ def main() -> None:
         output["run"].pop("failures", None)
         output["run"]["workers"] = args.workers
         output["run"]["metric_timeout_seconds"] = args.metric_timeout_seconds
-        print(f"Resuming {len(output['cases'])}/{len(goldens)} completed cases")
+        print(f"Resuming {len(output['cases'])}/{len(indexed_goldens)} completed cases")
     else:
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         stem = f"full_pipeline_{args.label}_{timestamp}"
@@ -254,9 +272,14 @@ def main() -> None:
                 "retrieval_k": RETRIEVAL_K,
                 "embedding_model": embedding_model,
                 "generator_model": generator_model,
+                "generator_max_tokens": generator_config["max_tokens"],
+                "generator_reasoning_effort": generator_config.get(
+                    "reasoning_effort"
+                ),
                 "judge_model": judge_model,
                 "goldens_sha256": goldens_hash,
                 "case_limit": args.limit,
+                "case_ids": sorted(selected_ids),
                 "workers": args.workers,
                 "metric_timeout_seconds": args.metric_timeout_seconds,
             },
@@ -268,13 +291,15 @@ def main() -> None:
         "architecture": args.label,
         "embedding_model": embedding_model,
         "generator_model": generator_model,
+        "generator_max_tokens": generator_config["max_tokens"],
+        "generator_reasoning_effort": generator_config.get("reasoning_effort"),
         "judge_model": judge_model,
         "retrieval_k": RETRIEVAL_K,
     }
     completed_ids = {case["case_id"] for case in output["cases"]}
     pending_goldens = [
         (index, golden)
-        for index, golden in enumerate(goldens, start=1)
+        for index, golden in indexed_goldens
         if f"manual_{index:03d}" not in completed_ids
     ]
     failures = []
@@ -299,7 +324,10 @@ def main() -> None:
                 output["cases"].sort(key=lambda case: case["case_id"])
                 output["averages"] = calculate_averages(output["cases"])
                 write_json_report(json_path, output)
-                print(f"Saved {len(output['cases'])}/{len(goldens)} completed cases")
+                print(
+                    f"Saved {len(output['cases'])}/{len(indexed_goldens)} "
+                    "completed cases"
+                )
             except Exception as error:
                 failure = {
                     "case_id": case_id,
