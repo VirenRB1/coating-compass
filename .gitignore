@@ -21,6 +21,7 @@ reports/*.json
 reports/*smoke*.md
 
 Coating_Compass_Project_Brief.md
+!docs/Coating_Compass_Project_Brief.md
 
 data/dulux_canada_knowledge_sources/*.pdf
 data/dulux_canada_knowledge_sources/manifest.csv
@@ -29,3 +30,4 @@ data/dulux_canada_knowledge_sources/README.md
 .gitignore
 data/dulux_canada_knowledge_sources/manifest.json
 Coating_Advisor_Reference_Repo_Codex_Handoff.md
+!docs/Coating_Advisor_Reference_Repo_Codex_Handoff.md
