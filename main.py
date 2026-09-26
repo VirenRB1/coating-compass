@@ -1,5 +1,5 @@
 def main():
-    print("Hello from Coating Compass!")
+    print("Helloo!")
 
 
 if __name__ == "__main__":
