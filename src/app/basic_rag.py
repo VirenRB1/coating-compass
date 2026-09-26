@@ -19,6 +19,8 @@ from pypdf import PdfReader
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 
+from src.app.prompt_registry import fetch_baseline_prompt
+
 
 SOURCE_DIRECTORY = Path("data/dulux_canada_knowledge_sources")
 MANIFEST_PATH = SOURCE_DIRECTORY / "manifest.json"
@@ -203,7 +205,7 @@ def build_vector_store() -> QdrantVectorStore:
     return vector_store
 
 
-def create_rag_graph(vector_store: QdrantVectorStore):
+def create_rag_graph(vector_store: QdrantVectorStore, system_prompt: str):
     retriever = vector_store.as_retriever(
         search_type="similarity",
         search_kwargs={"k": RETRIEVAL_K},
@@ -213,11 +215,7 @@ def create_rag_graph(vector_store: QdrantVectorStore):
         [
             (
                 "system",
-                "You are an evidence-based coating assistant. Use only the supplied source "
-                "excerpts. If the evidence is insufficient, say so. Do not invent product "
-                "compatibility, preparation, coverage, drying, temperature, or safety claims. "
-                "Include the supplied source filenames and page numbers in your answer. This is "
-                "an unofficial decision-support prototype, not manufacturer-approved advice.",
+                system_prompt,
             ),
             (
                 "human",
@@ -263,7 +261,8 @@ def main() -> None:
     if os.getenv("COATING_COMPASS_INGEST_ONLY") == "1":
         print("Ingest-only run complete.")
         return
-    rag_graph = create_rag_graph(vector_store)
+    prompt_version = fetch_baseline_prompt()
+    rag_graph = create_rag_graph(vector_store, prompt_version.text)
 
     print("Coating Compass basic RAG is ready. Type 'quit' to exit.")
     while True:

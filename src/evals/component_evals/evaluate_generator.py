@@ -12,6 +12,7 @@ from deepeval.test_case import LLMTestCase
 from dotenv import load_dotenv
 
 from src.app.basic_rag import COLLECTION_NAME, RETRIEVAL_K, build_vector_store, create_rag_graph
+from src.app.prompt_registry import fetch_baseline_prompt
 
 
 GOLDENS_PATH = Path("data/evaluations/manual_golden_dataset.json")
@@ -137,7 +138,8 @@ def main() -> None:
     truststore.inject_into_ssl()
     load_dotenv()
     goldens = json.loads(GOLDENS_PATH.read_text(encoding="utf-8"))
-    rag_graph = create_rag_graph(build_vector_store())
+    prompt_version = fetch_baseline_prompt()
+    rag_graph = create_rag_graph(build_vector_store(), prompt_version.text)
     judge_model = os.getenv(
         "COATING_COMPASS_GENERATOR_JUDGE_MODEL", "gpt-5-mini-2025-08-07"
     )
@@ -155,6 +157,12 @@ def main() -> None:
         output_path, output = max(
             partial_runs, key=lambda item: item[1]["run"]["timestamp_utc"]
         )
+        saved_prompt_version = output["run"].get("prompt_version")
+        if (
+            saved_prompt_version is not None
+            and saved_prompt_version != prompt_version.version
+        ):
+            raise ValueError("Cannot resume: Langfuse prompt version has changed.")
         print(f"Resuming {len(output['cases'])}/20 cases from {output_path}")
     else:
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -164,6 +172,9 @@ def main() -> None:
                 "label": args.label,
                 "timestamp_utc": timestamp,
                 "status": "running",
+                "prompt_name": prompt_version.name,
+                "prompt_label": prompt_version.label,
+                "prompt_version": prompt_version.version,
                 "collection": COLLECTION_NAME,
                 "retrieval_k": RETRIEVAL_K,
                 "generator_model": generator_model,

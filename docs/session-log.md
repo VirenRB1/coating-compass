@@ -6,6 +6,9 @@
   `baseline` label. Added a tested prompt-registry boundary that fetches that label,
   validates text content, and exposes prompt/version/config metadata without yet
   changing the RAG graph's runtime prompt.
+- Activated the fetched prompt through explicit graph dependency injection. The
+  interactive app and generator-aware evaluation commands now use Langfuse prompt
+  text, while evaluation artifacts record and resume-check the exact version.
 - Goal: add a reference-inspired full-pipeline DeepEval evaluation.
 - Added a seven-metric suite under `src/evals/application_evals/`.
 - Added GEval rubrics for answer simplicity and answer correctness.

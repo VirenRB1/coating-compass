@@ -57,6 +57,13 @@ graph does not consume it yet. Keeping retrieval separate from activation makes 
 change easy to test and prevents a remote prompt from silently changing application
 behavior in this increment.
 
+### Activation increment
+
+The RAG graph now requires prompt text as an explicit input. Application and
+evaluation entry points fetch the `baseline` version and inject its text when they
+construct the graph. Evaluation artifacts record the exact prompt version, and a
+partial evaluation refuses to resume if that label has moved to another version.
+
 ### Common failure mode
 
 `uv --system-certs` affects dependency downloads, not runtime HTTP clients. The

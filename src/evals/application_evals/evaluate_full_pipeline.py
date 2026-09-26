@@ -29,6 +29,7 @@ from src.app.basic_rag import (
     create_rag_graph,
     generator_model_config,
 )
+from src.app.prompt_registry import fetch_baseline_prompt
 from src.evals.application_evals.metrics import build_full_pipeline_metrics
 from src.evals.application_evals.reporting import (
     calculate_averages,
@@ -241,8 +242,9 @@ def main() -> None:
     )
     generator_model = os.getenv("COATING_COMPASS_GROQ_MODEL", "openai/gpt-oss-20b")
     generator_config = generator_model_config()
+    prompt_version = fetch_baseline_prompt()
     vector_store = build_vector_store()
-    rag_graph = create_rag_graph(vector_store)
+    rag_graph = create_rag_graph(vector_store, prompt_version.text)
 
     goldens_hash = hashlib.sha256(GOLDENS_PATH.read_bytes()).hexdigest()
     if args.resume:
@@ -252,6 +254,12 @@ def main() -> None:
             raise ValueError("Cannot resume: golden dataset hash has changed.")
         if output["run"].get("label") != args.label:
             raise ValueError("Cannot resume: --label does not match the saved run.")
+        saved_prompt_version = output["run"].get("prompt_version")
+        if (
+            saved_prompt_version is not None
+            and saved_prompt_version != prompt_version.version
+        ):
+            raise ValueError("Cannot resume: Langfuse prompt version has changed.")
         markdown_path = json_path.with_suffix(".md")
         output["run"]["status"] = "running"
         output["run"].pop("failures", None)
@@ -268,6 +276,9 @@ def main() -> None:
                 "label": args.label,
                 "timestamp_utc": timestamp,
                 "status": "running",
+                "prompt_name": prompt_version.name,
+                "prompt_label": prompt_version.label,
+                "prompt_version": prompt_version.version,
                 "collection": COLLECTION_NAME,
                 "retrieval_k": RETRIEVAL_K,
                 "embedding_model": embedding_model,
