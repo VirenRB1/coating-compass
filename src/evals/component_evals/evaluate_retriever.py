@@ -16,7 +16,7 @@ from deepeval.metrics import (
 from deepeval.test_case import LLMTestCase
 from dotenv import load_dotenv
 
-from basic_rag import COLLECTION_NAME, RETRIEVAL_K, build_vector_store
+from src.app.basic_rag import COLLECTION_NAME, RETRIEVAL_K, build_vector_store
 
 
 GOLDENS_PATH = Path("data/evaluations/manual_golden_dataset.json")

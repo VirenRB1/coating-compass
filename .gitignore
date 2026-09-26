@@ -17,6 +17,8 @@ AGENTS.md
 data/processed/
 data/vector_store/
 data/evaluations/results/
+reports/*.json
+reports/*smoke*.md
 
 Coating_Compass_Project_Brief.md
 
