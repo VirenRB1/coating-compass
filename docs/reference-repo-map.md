@@ -1,5 +1,14 @@
 # Reference repository map
 
+## Contextual dense retrieval
+
+This milestone follows the project brief's controlled retrieval progression rather
+than copying a reference-repository commit. It keeps the evaluated baseline store
+intact, changes one retrieval variable, and creates an auditable artifact boundary
+for a future retriever evaluation. The implementation is also inspired by
+Anthropic's contextual-retrieval architecture, adapted to the existing Groq model
+and coating-specific evidence rules. BM25 and reranking are postponed.
+
 ## Full-pipeline evaluation
 
 | Reference | Disposition | Coating Compass adaptation |

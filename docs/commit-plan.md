@@ -1,5 +1,19 @@
 # Commit plan
 
+## Milestone: contextual dense retrieval, stage 1
+
+- Status: implementation complete; paid pilot and full rollout pending approval.
+- Scope: stable chunk IDs, page-delimited full-document context generation,
+  resumable JSONL artifacts, a completeness manifest, and guarded indexing into
+  `coating-compass-contextual-dense-v1`.
+- Acceptance evidence: the offline dry run validates 36 source hashes and produces
+  921 chunks; unit tests cover model-independent IDs, context bounds, stale prompt
+  rejection, and preservation of original answer evidence.
+- Rollout boundary: do not run Groq generation or OpenAI embedding calls without
+  explicit owner approval. Review the 22010 TDS pilot before full-corpus generation.
+- Suggested commit: `feat: add guarded contextual dense retrieval pipeline`
+- Deferred: BM25, rank fusion, reranking, and comparative dashboards.
+
 ## Milestone: Full-pipeline DeepEval baseline
 
 - Status: implemented, executed, and organized for review.

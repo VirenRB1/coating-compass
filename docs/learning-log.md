@@ -1,5 +1,50 @@
 # Learning log
 
+## 2026-09-26 — Contextual dense retrieval artifact boundary
+
+### In my own words
+
+Contextual retrieval gives an otherwise ambiguous chunk a short description of its
+place in the complete document before embedding. That synthetic description helps
+search, but it is not manufacturer evidence. The vector is created from the context
+plus original text while answer generation receives only the original PDF text.
+
+### Why stable IDs and a manifest matter
+
+A chunk ID describes the source/chunk identity, so changing the embedding model must
+not change it. The manifest records source hashes, chunk settings, prompt hash, and
+completion counts. Indexing fails closed when any record is missing or stale instead
+of silently mixing experiments.
+
+### Alternatives and trade-offs
+
+Full-document prompting supplies the strongest local context and can benefit from
+Groq prefix caching when chunks are processed sequentially. It still costs one model
+generation per chunk and repeats a large prefix. A document-summary prefix is
+cheaper, but it adds another synthetic compression step and may omit local identity.
+
+### Common failure modes
+
+- A changed PDF hash means the immutable corpus no longer matches the manifest.
+- A changed prompt makes old generated records stale.
+- A partial run cannot build the contextual Qdrant collection.
+- PDF extraction can warn about optional `fontTools`; verify extracted text before
+  adding a dependency merely to silence warnings.
+
+### Commands I can run
+
+```powershell
+uv run python -m src.data.contextualize_documents --dry-run
+uv run python -m unittest tests/test_basic_rag_config.py
+```
+
+The non-dry-run command requires `--confirm-paid-calls` and provider credentials.
+
+### Exercise / teach-back
+
+Explain why generated context belongs in retrieval metadata but not in the evidence
+shown to the answer model.
+
 ## 2026-09-26 — Full-pipeline RAG evaluation and GEval
 
 ### In my own words
@@ -41,6 +86,31 @@ The second command uses hosted models and should run only with cost approval.
 ### Exercise / teach-back
 
 Explain why faithfulness can be high while answer correctness is low.
+
+## 2026-09-27 — Auditing synthetic retrieval context
+
+### In my own words
+
+Contextual text is useful for finding a chunk, but it is not manufacturer evidence.
+The reliable boundary is therefore deterministic: verify every stored record against
+the immutable PDF-derived chunk, then give the answer model only the original chunk.
+
+### Evidence and trade-off
+
+All 921 contextual records matched their source metadata and text. A representative
+human review found relevant, grounded summaries and no unsupported numeric values,
+but product identifiers were inconsistent and one legacy Groq record confused an
+SDS section number with a page number. Regenerating the entire corpus now would cost
+tokens without evidence that these imperfections hurt retrieval. Index version 1,
+measure the known `manual_002` miss, and improve the prompt only if evaluation shows
+that identity omissions matter.
+
+### Common failure mode
+
+Do not read the append-only provider logs as the finished dataset. They include
+superseded failures from resumable attempts. Use the validated compact
+`chunks.jsonl`, whose 921 records represent the latest successful result for each
+stable chunk ID.
 
 ## 2026-09-26 — Fetching a versioned Langfuse prompt
 

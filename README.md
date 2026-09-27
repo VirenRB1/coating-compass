@@ -63,6 +63,83 @@ uv run python -m src.evals.component_evals.evaluate_generator --label baseline
 uv run python -m src.evals.application_evals.evaluate_full_pipeline --label baseline --workers 2 --metric-timeout-seconds 300
 ```
 
+After the contextual collection is complete and indexed, run only the known
+`manual_002` retrieval miss before considering a full evaluation:
+
+```powershell
+uv run python -m src.evals.component_evals.evaluate_retriever `
+  --label contextual-dense-v1 `
+  --case-id manual_002
+```
+
 The full-pipeline evaluation writes a resumable JSON artifact and a human-readable
 Markdown report. JSON artifacts are local run data; the reviewed Markdown baseline
 may be committed as experiment evidence.
+
+## Contextual dense retrieval
+
+The contextual pipeline creates a synthetic, chunk-specific retrieval prefix from
+each complete PDF. The prefix is embedded with the original chunk, but only the
+unchanged manufacturer chunk is returned to the answer model as evidence.
+
+Validate source hashes and reproduce the expected corpus inventory without network
+or API calls:
+
+```powershell
+uv run python -m src.data.contextualize_documents --dry-run
+```
+
+The expected result is 36 documents and 921 chunks. Generated records and their
+manifest are checkpointed under the ignored `data/processed/contextual_dense_v1/`
+directory. A partial or stale artifact cannot be indexed.
+
+After explicit approval for paid Groq calls, run the X-PERT Waterborne Alkyd pilot:
+
+```powershell
+uv run python -m src.data.contextualize_documents `
+  --document 06_Dulux_XPERT_Waterborne_Alkyd_22010_01_TDS.pdf `
+  --confirm-paid-calls
+```
+
+Review every pilot record before omitting `--document` for the resumable full-corpus
+run. Application and evaluation ingestion remain on the baseline until all 921
+records are complete. They then activate `coating-compass-contextual-dense-v1` only
+after validating every record. Building the new collection calls the configured
+OpenAI embedding API; the existing baseline collection remains untouched.
+
+If Groq's daily free-tier quota stops a resumable corpus run, the remaining chunks
+can use `gpt-5-mini` through the existing OpenAI account:
+
+```powershell
+uv run python -m src.data.contextualize_documents `
+  --provider openai `
+  --confirm-paid-calls
+```
+
+Use `--provider auto` to start with Groq, route Groq-oversized documents through
+OpenAI, and switch the remaining run to OpenAI after Groq's daily quota is exhausted.
+OpenAI quota exhaustion still stops the checkpointed run.
+
+Groq and OpenAI records may coexist in the same manifest. Configure an OpenAI
+project-side budget or credit cap first: the local command stops on an explicit API
+quota rejection, but cannot determine whether an accepted request used promotional
+or paid account balance.
+
+OpenAI prompt caching is automatic for eligible repeated prefixes. Context generation
+groups chunks sequentially by PDF and places the stable instructions and complete
+document before the varying chunk. After all 921 chunks complete, the command writes
+`data/processed/contextual_dense_v1/chunks.jsonl` with exactly one latest successful
+record per chunk; append-only per-document records remain available for auditing.
+
+Build or resume the separate contextual Qdrant collection without starting the
+interactive application:
+
+```powershell
+$env:COATING_COMPASS_INGEST_ONLY = "1"
+uv run python main.py
+```
+
+The command validates the complete contextual artifact before changing Qdrant. It
+embeds only missing stable chunk IDs, so rerunning it reuses all completed points.
+The local vector-store files under `data/vector_store/` are generated artifacts and
+must not be committed.
