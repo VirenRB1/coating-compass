@@ -2,6 +2,25 @@
 
 ## 2026-09-27
 
+- Added an explicit OpenAI answer-generator option after the full contextual run hit
+  Groq's 200,000-token daily limit. Provider and model are now recorded and protected
+  on resume, preventing the nine completed GPT-OSS cases from being mixed silently
+  with GPT-5 mini cases. The incomplete Groq artifact remains unchanged.
+- Completed a fresh 20-case contextual-dense run with GPT-5 mini as generator and
+  judge. The reviewed Markdown report records recall 0.596, precision 0.947,
+  relevancy 0.630, answer relevancy 0.908, faithfulness 0.942, simplicity 0.870,
+  and correctness 0.795. The machine-readable JSON remains an ignored local artifact.
+
+- Extended the existing full-pipeline evaluator with `--goldens PATH` instead of
+  adding a second orchestration path. The default remains the reviewed manual dataset.
+- Strengthened local validation for non-empty questions, expected answers, context
+  lists, and context passages; validation and resume hash/label checks now happen
+  before any hosted prompt, embedding, generation, or judge setup.
+- Recorded the golden path and SHA-256 in run metadata and exposed the path in the
+  Markdown report. An omitted run label now uses the active Qdrant collection name.
+- Added standard-library coverage for custom/default paths, malformed input, exact
+  file hashing, and changed-input resume rejection. No hosted smoke run was performed.
+
 - Built the separate local Qdrant collection
   `coating-compass-contextual-dense-v1` from all 921 validated contextual records,
   using `text-embedding-3-small` vectors with 1,536 dimensions and cosine distance.

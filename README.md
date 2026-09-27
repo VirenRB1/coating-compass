@@ -54,13 +54,17 @@ Validate golden-generation inputs without calling a model:
 uv run python -m src.data.generate_manual_goldens
 ```
 
-The component and full-pipeline commands call hosted judge models and should only run
-with cost approval:
+The component and full-pipeline commands call hosted retrieval, generation, and judge
+models and should only run with cost approval. The full-pipeline command validates
+the reviewed golden dataset before making those calls:
 
 ```powershell
 uv run python -m src.evals.component_evals.evaluate_retriever --label baseline
 uv run python -m src.evals.component_evals.evaluate_generator --label baseline
-uv run python -m src.evals.application_evals.evaluate_full_pipeline --label baseline --workers 2 --metric-timeout-seconds 300
+uv run python -m src.evals.application_evals.evaluate_full_pipeline `
+  --goldens data/evaluations/manual_golden_dataset.json `
+  --workers 2 `
+  --metric-timeout-seconds 300
 ```
 
 After the contextual collection is complete and indexed, run only the known
@@ -72,9 +76,36 @@ uv run python -m src.evals.component_evals.evaluate_retriever `
   --case-id manual_002
 ```
 
-The full-pipeline evaluation writes a resumable JSON artifact and a human-readable
-Markdown report. JSON artifacts are local run data; the reviewed Markdown baseline
-may be committed as experiment evidence.
+When `--label` is omitted, the full-pipeline run label is the active Qdrant collection
+name. `--label` remains available for an explicit experiment label. The command writes
+a combined, resumable JSON dataset and a human-readable Markdown report under
+`reports/full_pipeline_<label>_<timestamp>.json` and `.md`. Each JSON case retains the
+reviewed answer/context, retrieved manufacturer context, actual application answer,
+and all seven metric results and reasons. JSON artifacts are local run data; the
+reviewed Markdown report may be committed as experiment evidence.
+
+Resume an interrupted run with the same golden file and saved JSON artifact:
+
+```powershell
+uv run python -m src.evals.application_evals.evaluate_full_pipeline `
+  --goldens data/evaluations/manual_golden_dataset.json `
+  --resume reports/full_pipeline_<label>_<timestamp>.json
+```
+
+The saved input path and SHA-256 make the run auditable. Resume fails before hosted
+calls if the golden file contents changed or its run label no longer matches.
+Generator provider and model are also resume-protected so one report cannot silently
+combine answers from different systems. To evaluate with GPT-5 mini as both the
+application generator and judge, set these session variables and start a new run:
+
+```powershell
+$env:COATING_COMPASS_GENERATOR_PROVIDER = "openai"
+$env:COATING_COMPASS_GENERATOR_MODEL = "gpt-5-mini-2025-08-07"
+uv run python -m src.evals.application_evals.evaluate_full_pipeline `
+  --goldens data/evaluations/manual_golden_dataset.json `
+  --workers 1 `
+  --metric-timeout-seconds 300
+```
 
 ## Contextual dense retrieval
 

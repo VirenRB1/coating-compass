@@ -46,7 +46,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Evaluate retrieval and generation across the full RAG pipeline."
     )
-    parser.add_argument("--label", default="baseline")
+    parser.add_argument(
+        "--goldens",
+        type=Path,
+        default=GOLDENS_PATH,
+        help=f"Reviewed golden dataset (default: {GOLDENS_PATH}).",
+    )
+    parser.add_argument(
+        "--label",
+        help="Run label override (default: the active Qdrant collection name).",
+    )
     parser.add_argument(
         "--case-id",
         action="append",
@@ -84,12 +93,62 @@ def validate_goldens(data: Any) -> list[dict[str, Any]]:
         raise ValueError("The golden dataset must be a non-empty JSON list.")
     required = {"question", "expected_answer", "expected_context"}
     for index, golden in enumerate(data, start=1):
+        if not isinstance(golden, dict):
+            raise ValueError(f"Golden case {index} must be a JSON object.")
         missing = sorted(required - golden.keys())
         if missing:
             raise ValueError(f"Golden case {index} is missing fields: {missing}")
-        if not isinstance(golden["expected_context"], list):
-            raise ValueError(f"Golden case {index} expected_context must be a list.")
+        for field in ("question", "expected_answer"):
+            if not isinstance(golden[field], str) or not golden[field].strip():
+                raise ValueError(
+                    f"Golden case {index} {field} must be a non-empty string."
+                )
+        expected_context = golden["expected_context"]
+        if not isinstance(expected_context, list) or not expected_context:
+            raise ValueError(
+                f"Golden case {index} expected_context must be a non-empty list."
+            )
+        if any(
+            not isinstance(passage, str) or not passage.strip()
+            for passage in expected_context
+        ):
+            raise ValueError(
+                f"Golden case {index} expected_context passages must be non-empty strings."
+            )
     return data
+
+
+def load_goldens(path: Path) -> tuple[list[dict[str, Any]], str]:
+    """Load, validate, and hash the exact reviewed input before hosted calls."""
+
+    raw = path.read_bytes()
+    goldens = validate_goldens(json.loads(raw.decode("utf-8")))
+    return goldens, hashlib.sha256(raw).hexdigest()
+
+
+def validate_resume_input(
+    output: dict[str, Any], *, goldens_hash: str, label: str
+) -> None:
+    """Reject an artifact whose immutable inputs differ from this invocation."""
+
+    if output.get("run", {}).get("goldens_sha256") != goldens_hash:
+        raise ValueError("Cannot resume: golden dataset hash has changed.")
+    if output["run"].get("label") != label:
+        raise ValueError("Cannot resume: --label does not match the saved run.")
+
+
+def validate_resume_generator(
+    output: dict[str, Any], *, provider: str, model: str
+) -> None:
+    """Prevent one report from combining answers from different generators."""
+
+    run = output.get("run", {})
+    saved_model = run.get("generator_model")
+    saved_provider = run.get("generator_provider", "groq")
+    if saved_provider != provider or saved_model != model:
+        raise ValueError(
+            "Cannot resume: generator provider or model differs from the saved run."
+        )
 
 
 def render_retrieval_context(documents: list) -> list[str]:
@@ -206,6 +265,7 @@ def main() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
     args = parse_args()
+    label = args.label or COLLECTION_NAME
     if args.limit is not None and args.limit < 1:
         raise ValueError("--limit must be at least 1.")
     if args.workers < 1:
@@ -213,13 +273,9 @@ def main() -> None:
     if args.metric_timeout_seconds < 1:
         raise ValueError("--metric-timeout-seconds must be at least 1.")
 
-    os.environ["DEEPEVAL_PER_ATTEMPT_TIMEOUT_SECONDS_OVERRIDE"] = str(
-        args.metric_timeout_seconds
-    )
-
-    truststore.inject_into_ssl()
-    load_dotenv()
-    goldens = validate_goldens(json.loads(GOLDENS_PATH.read_text(encoding="utf-8")))
+    # Dataset validation, selection, and resume identity checks intentionally happen
+    # before prompt, embedding, generation, or judge clients can make hosted calls.
+    goldens, goldens_hash = load_goldens(args.goldens)
     indexed_goldens = list(enumerate(goldens, start=1))
     selected_ids = set(args.case_id or [])
     if selected_ids:
@@ -234,26 +290,35 @@ def main() -> None:
     elif args.limit is not None:
         indexed_goldens = indexed_goldens[: args.limit]
 
+    load_dotenv()
+    generator_config = generator_model_config()
+    generator_provider = generator_config["provider"]
+    generator_model = generator_config["model"]
+
+    if args.resume:
+        json_path = args.resume
+        output = json.loads(json_path.read_text(encoding="utf-8"))
+        validate_resume_input(output, goldens_hash=goldens_hash, label=label)
+        validate_resume_generator(
+            output, provider=generator_provider, model=generator_model
+        )
+
+    os.environ["DEEPEVAL_PER_ATTEMPT_TIMEOUT_SECONDS_OVERRIDE"] = str(
+        args.metric_timeout_seconds
+    )
+    truststore.inject_into_ssl()
+
     judge_model = os.getenv(
         "COATING_COMPASS_EVALUATION_MODEL", "gpt-5-mini-2025-08-07"
     )
     embedding_model = os.getenv(
         "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
     )
-    generator_model = os.getenv("COATING_COMPASS_GROQ_MODEL", "openai/gpt-oss-20b")
-    generator_config = generator_model_config()
     prompt_version = fetch_baseline_prompt()
     vector_store = build_vector_store()
     rag_graph = create_rag_graph(vector_store, prompt_version.text)
 
-    goldens_hash = hashlib.sha256(GOLDENS_PATH.read_bytes()).hexdigest()
     if args.resume:
-        json_path = args.resume
-        output = json.loads(json_path.read_text(encoding="utf-8"))
-        if output.get("run", {}).get("goldens_sha256") != goldens_hash:
-            raise ValueError("Cannot resume: golden dataset hash has changed.")
-        if output["run"].get("label") != args.label:
-            raise ValueError("Cannot resume: --label does not match the saved run.")
         saved_prompt_version = output["run"].get("prompt_version")
         if (
             saved_prompt_version is not None
@@ -265,15 +330,16 @@ def main() -> None:
         output["run"].pop("failures", None)
         output["run"]["workers"] = args.workers
         output["run"]["metric_timeout_seconds"] = args.metric_timeout_seconds
+        output["run"]["goldens_path"] = str(args.goldens)
         print(f"Resuming {len(output['cases'])}/{len(indexed_goldens)} completed cases")
     else:
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        stem = f"full_pipeline_{args.label}_{timestamp}"
+        stem = f"full_pipeline_{label}_{timestamp}"
         json_path = REPORTS_DIRECTORY / f"{stem}.json"
         markdown_path = REPORTS_DIRECTORY / f"{stem}.md"
         output = {
             "run": {
-                "label": args.label,
+                "label": label,
                 "timestamp_utc": timestamp,
                 "status": "running",
                 "prompt_name": prompt_version.name,
@@ -282,12 +348,14 @@ def main() -> None:
                 "collection": COLLECTION_NAME,
                 "retrieval_k": RETRIEVAL_K,
                 "embedding_model": embedding_model,
+                "generator_provider": generator_provider,
                 "generator_model": generator_model,
                 "generator_max_tokens": generator_config["max_tokens"],
                 "generator_reasoning_effort": generator_config.get(
                     "reasoning_effort"
                 ),
                 "judge_model": judge_model,
+                "goldens_path": str(args.goldens),
                 "goldens_sha256": goldens_hash,
                 "case_limit": args.limit,
                 "case_ids": sorted(selected_ids),
@@ -299,8 +367,9 @@ def main() -> None:
         }
 
     hyperparameters = {
-        "architecture": args.label,
+        "architecture": label,
         "embedding_model": embedding_model,
+        "generator_provider": generator_provider,
         "generator_model": generator_model,
         "generator_max_tokens": generator_config["max_tokens"],
         "generator_reasoning_effort": generator_config.get("reasoning_effort"),

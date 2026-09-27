@@ -12,6 +12,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_qdrant import QdrantVectorStore
 from langgraph.graph import END, START, StateGraph
 from qdrant_client import QdrantClient
@@ -130,7 +131,17 @@ def contextual_retrieval_text(generated_context: str, original_text: str) -> str
 def generator_model_config() -> dict:
     """Return validated, reproducible settings for the hosted answer model."""
 
-    model = os.getenv("COATING_COMPASS_GROQ_MODEL", "openai/gpt-oss-20b")
+    provider = os.getenv("COATING_COMPASS_GENERATOR_PROVIDER", "groq").lower()
+    if provider not in {"groq", "openai"}:
+        raise ValueError(
+            "COATING_COMPASS_GENERATOR_PROVIDER must be 'groq' or 'openai'."
+        )
+    default_model = (
+        os.getenv("COATING_COMPASS_GROQ_MODEL", "openai/gpt-oss-20b")
+        if provider == "groq"
+        else "gpt-5-mini-2025-08-07"
+    )
+    model = os.getenv("COATING_COMPASS_GENERATOR_MODEL", default_model)
     max_tokens = int(
         os.getenv(
             "COATING_COMPASS_GENERATOR_MAX_TOKENS",
@@ -141,17 +152,28 @@ def generator_model_config() -> dict:
         raise ValueError("COATING_COMPASS_GENERATOR_MAX_TOKENS must be positive.")
 
     config = {
+        "provider": provider,
         "model": model,
         "temperature": 0,
         "max_tokens": max_tokens,
         "timeout": 30,
         "max_retries": 2,
     }
-    if model.startswith("openai/gpt-oss-"):
+    if model.startswith("openai/gpt-oss-") or model.startswith("gpt-5"):
         config["reasoning_effort"] = os.getenv(
             "COATING_COMPASS_GENERATOR_REASONING_EFFORT", "low"
         )
     return config
+
+
+def create_generator_model():
+    """Construct the configured hosted chat model without changing RAG behavior."""
+
+    config = generator_model_config()
+    provider = config.pop("provider")
+    if provider == "openai":
+        return ChatOpenAI(**config)
+    return ChatGroq(**config)
 
 
 def load_complete_contextual_documents() -> list[tuple[str, Document, str]]:
@@ -317,7 +339,7 @@ def create_rag_graph(vector_store: QdrantVectorStore, system_prompt: str):
         search_type="similarity",
         search_kwargs={"k": RETRIEVAL_K},
     )
-    model = ChatGroq(**generator_model_config())
+    model = create_generator_model()
     prompt = ChatPromptTemplate.from_messages(
         [
             (

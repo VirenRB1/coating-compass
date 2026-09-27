@@ -1,5 +1,45 @@
 # Learning log
 
+## 2026-09-27 — Generator provider identity in evaluations
+
+The answer generator and evaluation judge are separate experimental variables. A
+partially completed GPT-OSS/Groq report must not be resumed with GPT-5 mini/OpenAI,
+because its aggregate would describe two different application systems. The RAG
+generator now supports an explicit Groq or OpenAI provider using existing dependencies,
+records both provider and model, and rejects a resume when either differs. Start a new
+report when changing the generator; preserve the incomplete report as evidence.
+
+## 2026-09-27 — One full-application evaluation pipeline
+
+### In my own words
+
+A golden dataset is the reviewed input: questions, expected answers, and supporting
+manufacturer passages. The evaluation dataset is the combined resumable JSON output,
+which adds live retrieval, application answers, and metric judgments. Keeping these
+roles distinct avoids a duplicate pre-scoring format and a second orchestrator.
+
+### Evidence and trade-off
+
+The existing evaluator already owned retrieval, generation, seven metrics,
+checkpointing, and reports, but its input path and `baseline` label were hard-coded.
+It now accepts any reviewed JSON file, validates every required string and context
+passage locally, records the exact path and hash, and defaults the label to the active
+Qdrant collection. A separate schema dependency would provide richer error formatting
+but is unnecessary for three fields and would expand this small increment.
+
+### Common failure modes
+
+- Empty strings and empty context lists are invalid even when the JSON keys exist.
+- A resume artifact is rejected if the current golden bytes produce another SHA-256.
+- Omitting `--label` while resuming an older explicitly labelled run can cause a label
+  mismatch; pass that saved label explicitly.
+- Passing validation does not authorize hosted calls; evaluation still requires cost
+  approval and provider credentials.
+
+### Exercise / teach-back
+
+Explain why the dataset hash must be checked before constructing hosted clients.
+
 ## 2026-09-26 — Contextual dense retrieval artifact boundary
 
 ### In my own words
