@@ -13,23 +13,47 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 from langchain_qdrant import QdrantVectorStore
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langgraph.graph import END, START, StateGraph
-from pypdf import PdfReader
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams
+from qdrant_client.models import Distance, PointStruct, VectorParams
 
 from src.app.prompt_registry import fetch_baseline_prompt
+from src.data.contextualize_documents import (
+    MANIFEST_PATH as CONTEXTUAL_MANIFEST_PATH,
+    PROMPT_HASH,
+    read_latest_records,
+    valid_success,
+)
+from src.data.corpus import (
+    CHUNK_OVERLAP,
+    CHUNK_SIZE,
+    load_document_chunks,
+    stable_chunk_id,
+)
 
 
-SOURCE_DIRECTORY = Path("data/dulux_canada_knowledge_sources")
-MANIFEST_PATH = SOURCE_DIRECTORY / "manifest.json"
 VECTOR_STORE_DIRECTORY = Path("data/vector_store/qdrant")
-COLLECTION_NAME = "coating-compass-baseline-v1"
+BASELINE_COLLECTION_NAME = "coating-compass-baseline-v1"
+CONTEXTUAL_COLLECTION_NAME = "coating-compass-contextual-dense-v1"
+
+
+def contextual_artifact_declares_complete() -> bool:
+    if not CONTEXTUAL_MANIFEST_PATH.is_file():
+        return False
+    try:
+        manifest = json.loads(CONTEXTUAL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return manifest.get("completion_state") == "complete"
+
+
+COLLECTION_NAME = (
+    CONTEXTUAL_COLLECTION_NAME
+    if contextual_artifact_declares_complete()
+    else BASELINE_COLLECTION_NAME
+)
 EMBEDDING_DIMENSIONS = 1_536
 
-CHUNK_SIZE = 1_000
-CHUNK_OVERLAP = 150
 RETRIEVAL_K = 5
 DEFAULT_GENERATOR_MAX_TOKENS = 2_000
 
@@ -65,58 +89,23 @@ class OpenAIEmbeddingAdapter(Embeddings):
         return [item["embedding"] for item in data]
 
 
-def load_manifest_metadata() -> dict[str, dict]:
-    products = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    metadata_by_filename: dict[str, dict] = {}
-
-    for product in products:
-        for document_type in ("tds", "sds"):
-            document = product[document_type]
-            metadata_by_filename[document["filename"]] = {
-                "product_family": product["product_family"],
-                "sku": product["selected_sku"],
-                "finish": product["selected_sheen"],
-                "document_type": document_type.upper(),
-                "document_sha256": document["sha256"],
-                "source_url": product[f"{document_type}_url"],
-            }
-
-    return metadata_by_filename
-
-
 def load_and_split_documents() -> list[Document]:
-    metadata_by_filename = load_manifest_metadata()
-    pages: list[Document] = []
-    pdf_paths = sorted(SOURCE_DIRECTORY.glob("*.pdf"))
+    chunks = load_document_chunks()
     pdf_limit = int(os.getenv("COATING_COMPASS_PDF_LIMIT", "0"))
     if pdf_limit > 0:
-        pdf_paths = pdf_paths[:pdf_limit]
-
-    for pdf_path in pdf_paths:
-        source_metadata = metadata_by_filename[pdf_path.name]
-        pdf = PdfReader(pdf_path)
-        for page_index, pdf_page in enumerate(pdf.pages):
-            pages.append(
-                Document(
-                    page_content=(pdf_page.extract_text() or "").strip(),
-                    metadata={
-                        **source_metadata,
-                        "source_filename": pdf_path.name,
-                        "page_number": page_index + 1,
-                    },
-                )
-            )
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        add_start_index=True,
-        separators=["\n\n", "\n", ". ", " ", ""],
-    )
-    return splitter.split_documents(pages)
+        filenames = sorted({chunk.metadata["source_filename"] for chunk in chunks})
+        allowed = set(filenames[:pdf_limit])
+        chunks = [
+            chunk
+            for chunk in chunks
+            if chunk.metadata["source_filename"] in allowed
+        ]
+    return chunks
 
 
 def chunk_id(document: Document, embedding_model: str) -> str:
+    """Preserve the existing baseline point-ID format."""
+
     identity = "|".join(
         [
             document.metadata["document_sha256"],
@@ -130,6 +119,12 @@ def chunk_id(document: Document, embedding_model: str) -> str:
     )
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     return str(uuid.UUID(digest[:32]))
+
+
+def contextual_retrieval_text(generated_context: str, original_text: str) -> str:
+    """Compose embedding input without changing answer-generation evidence."""
+
+    return f"{generated_context}\n\n{original_text}"
 
 
 def generator_model_config() -> dict:
@@ -159,6 +154,152 @@ def generator_model_config() -> dict:
     return config
 
 
+def load_complete_contextual_documents() -> list[tuple[str, Document, str]]:
+    """Validate every contextual record before allowing any contextual indexing."""
+
+    if not CONTEXTUAL_MANIFEST_PATH.is_file():
+        raise ValueError(
+            "Contextual artifacts are missing. Run "
+            "`python -m src.data.contextualize_documents --dry-run` first."
+        )
+    manifest = json.loads(CONTEXTUAL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    if manifest.get("completion_state") != "complete":
+        raise ValueError("Contextual artifact manifest is not complete; refusing to index.")
+    if manifest.get("context_settings", {}).get("prompt_sha256") != PROMPT_HASH:
+        raise ValueError("Contextual artifact prompt hash is stale; refusing to index.")
+
+    chunks = load_and_split_documents()
+    current_source_hashes = {
+        chunk.metadata["source_filename"]: chunk.metadata["document_sha256"]
+        for chunk in chunks
+    }
+    if manifest.get("source_hashes") != current_source_hashes:
+        raise ValueError("Contextual manifest source hashes are stale; refusing to index.")
+    expected_counts = manifest.get("counts", {})
+    document_count_changed = expected_counts.get("documents") != len(
+        current_source_hashes
+    )
+    chunk_count_changed = expected_counts.get("chunks") != len(chunks)
+    if document_count_changed or chunk_count_changed:
+        raise ValueError("Contextual manifest counts do not match the current corpus.")
+    latest = read_latest_records()
+    expected_ids = {stable_chunk_id(chunk) for chunk in chunks}
+    if set(latest) != expected_ids:
+        raise ValueError("Contextual records do not exactly match current source chunks.")
+
+    contextual_documents = []
+    for chunk in chunks:
+        identifier = stable_chunk_id(chunk)
+        record = latest[identifier]
+        if not valid_success(record, chunk):
+            raise ValueError(f"Missing, invalid, or stale contextual record: {identifier}")
+        metadata = {
+            **chunk.metadata,
+            "chunk_id": identifier,
+            "generated_context": record["generated_context"],
+            "generated_context_is_synthetic": True,
+            "context_model": record["model"],
+            "context_prompt_sha256": record["prompt_sha256"],
+        }
+        original = Document(page_content=chunk.page_content, metadata=metadata)
+        retrieval_text = contextual_retrieval_text(
+            record["generated_context"], chunk.page_content
+        )
+        contextual_documents.append((identifier, original, retrieval_text))
+    return contextual_documents
+
+
+def create_qdrant_store(
+    client: QdrantClient, collection_name: str, embeddings: OpenAIEmbeddingAdapter
+) -> QdrantVectorStore:
+    if not client.collection_exists(collection_name):
+        client.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(
+                size=EMBEDDING_DIMENSIONS,
+                distance=Distance.COSINE,
+            ),
+        )
+    return QdrantVectorStore(
+        client=client,
+        collection_name=collection_name,
+        embedding=embeddings,
+    )
+
+
+def build_baseline_vector_store(
+    client: QdrantClient, embeddings: OpenAIEmbeddingAdapter, embedding_model: str
+) -> QdrantVectorStore:
+    vector_store = create_qdrant_store(
+        client, BASELINE_COLLECTION_NAME, embeddings
+    )
+    chunks = load_and_split_documents()
+    identifiers = [chunk_id(chunk, embedding_model) for chunk in chunks]
+    existing_points = client.retrieve(
+        collection_name=BASELINE_COLLECTION_NAME,
+        ids=identifiers,
+        with_payload=False,
+        with_vectors=False,
+    )
+    existing_ids = {str(point.id) for point in existing_points}
+    missing_chunks = [
+        chunk
+        for chunk, identifier in zip(chunks, identifiers, strict=True)
+        if identifier not in existing_ids
+    ]
+    missing_ids = [
+        identifier for identifier in identifiers if identifier not in existing_ids
+    ]
+    if missing_chunks:
+        print(f"Embedding {len(missing_chunks)} new baseline chunks...")
+        vector_store.add_documents(documents=missing_chunks, ids=missing_ids)
+    else:
+        print(f"Reusing {len(identifiers)} existing baseline chunk embeddings.")
+    return vector_store
+
+
+def build_contextual_vector_store(
+    client: QdrantClient, embeddings: OpenAIEmbeddingAdapter
+) -> QdrantVectorStore:
+    contextual_documents = load_complete_contextual_documents()
+    vector_store = create_qdrant_store(
+        client, CONTEXTUAL_COLLECTION_NAME, embeddings
+    )
+    chunk_ids = [item[0] for item in contextual_documents]
+    existing_points = client.retrieve(
+        collection_name=CONTEXTUAL_COLLECTION_NAME,
+        ids=chunk_ids,
+        with_payload=False,
+        with_vectors=False,
+    )
+    existing_ids = {str(point.id) for point in existing_points}
+    missing = [item for item in contextual_documents if item[0] not in existing_ids]
+    if missing:
+        print(f"Embedding {len(missing)} new contextual chunks...")
+        for offset in range(0, len(missing), 64):
+            batch = missing[offset : offset + 64]
+            vectors = embeddings.embed_documents([item[2] for item in batch])
+            client.upsert(
+                collection_name=CONTEXTUAL_COLLECTION_NAME,
+                points=[
+                    PointStruct(
+                        id=identifier,
+                        vector=vector,
+                        payload={
+                            "page_content": original.page_content,
+                            "metadata": original.metadata,
+                        },
+                    )
+                    for (identifier, original, _), vector in zip(
+                        batch, vectors, strict=True
+                    )
+                ],
+            )
+    else:
+        print(f"Reusing {len(chunk_ids)} existing contextual chunk embeddings.")
+    return vector_store
+
+
 def build_vector_store() -> QdrantVectorStore:
     embedding_model = os.getenv(
         "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
@@ -166,43 +307,9 @@ def build_vector_store() -> QdrantVectorStore:
     embeddings = OpenAIEmbeddingAdapter(model=embedding_model)
     VECTOR_STORE_DIRECTORY.mkdir(parents=True, exist_ok=True)
     client = QdrantClient(path=str(VECTOR_STORE_DIRECTORY))
-    if not client.collection_exists(COLLECTION_NAME):
-        client.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(
-                size=EMBEDDING_DIMENSIONS,
-                distance=Distance.COSINE,
-            ),
-        )
-    vector_store = QdrantVectorStore(
-        client=client,
-        collection_name=COLLECTION_NAME,
-        embedding=embeddings,
-    )
-
-    chunks = load_and_split_documents()
-    chunk_ids = [chunk_id(chunk, embedding_model) for chunk in chunks]
-    existing_points = client.retrieve(
-        collection_name=COLLECTION_NAME,
-        ids=chunk_ids,
-        with_payload=False,
-        with_vectors=False,
-    )
-    existing_ids = {str(point.id) for point in existing_points}
-
-    missing_chunks = [
-        chunk for chunk, identifier in zip(chunks, chunk_ids, strict=True)
-        if identifier not in existing_ids
-    ]
-    missing_ids = [identifier for identifier in chunk_ids if identifier not in existing_ids]
-
-    if missing_chunks:
-        print(f"Embedding {len(missing_chunks)} new chunks...")
-        vector_store.add_documents(documents=missing_chunks, ids=missing_ids)
-    else:
-        print(f"Reusing {len(chunk_ids)} existing chunk embeddings.")
-
-    return vector_store
+    if contextual_artifact_declares_complete():
+        return build_contextual_vector_store(client, embeddings)
+    return build_baseline_vector_store(client, embeddings, embedding_model)
 
 
 def create_rag_graph(vector_store: QdrantVectorStore, system_prompt: str):

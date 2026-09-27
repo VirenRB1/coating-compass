@@ -32,7 +32,31 @@ METRIC_NAMES = [
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate the baseline retriever.")
     parser.add_argument("--label", default="baseline")
+    parser.add_argument(
+        "--case-id",
+        action="append",
+        help="Evaluate only this manual_NNN case ID. Repeat to select more than one.",
+    )
     return parser.parse_args()
+
+
+def select_goldens(
+    goldens: list[dict], case_ids: list[str] | None
+) -> list[tuple[int, dict]]:
+    indexed_goldens = list(enumerate(goldens, start=1))
+    selected_ids = set(case_ids or [])
+    if not selected_ids:
+        return indexed_goldens
+
+    selected = [
+        (index, golden)
+        for index, golden in indexed_goldens
+        if f"manual_{index:03d}" in selected_ids
+    ]
+    found_ids = {f"manual_{index:03d}" for index, _ in selected}
+    if missing_ids := selected_ids - found_ids:
+        raise ValueError(f"Unknown case IDs: {sorted(missing_ids)}")
+    return selected
 
 
 def write_markdown_report() -> None:
@@ -114,10 +138,11 @@ def main() -> None:
     truststore.inject_into_ssl()
     load_dotenv()
     goldens = json.loads(GOLDENS_PATH.read_text(encoding="utf-8"))
+    indexed_goldens = select_goldens(goldens, args.case_id)
     vector_store = build_vector_store()
 
     test_cases = []
-    for index, golden in enumerate(goldens, start=1):
+    for index, golden in indexed_goldens:
         documents = vector_store.similarity_search(golden["question"], k=RETRIEVAL_K)
         retrieval_context = [
             f"Source: {document.metadata['source_filename']}, "
@@ -155,6 +180,7 @@ def main() -> None:
             ),
             "evaluation_model": model,
             "goldens_sha256": hashlib.sha256(GOLDENS_PATH.read_bytes()).hexdigest(),
+            "case_ids": [f"manual_{index:03d}" for index, _ in indexed_goldens],
         },
         "averages": {},
         "cases": [],

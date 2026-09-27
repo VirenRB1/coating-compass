@@ -29,5 +29,13 @@ data/dulux_canada_knowledge_sources/manifest.csv
 data/dulux_canada_knowledge_sources/README.md
 .gitignore
 data/dulux_canada_knowledge_sources/manifest.json
+
+# Project documentation
+docs/
 Coating_Advisor_Reference_Repo_Codex_Handoff.md
 !docs/Coating_Advisor_Reference_Repo_Codex_Handoff.md
+docs/commit-plan.md
+docs/learning-log.md
+docs/reference-repo-map.md
+docs/session-log.md
+docs/session-log.md
