@@ -10,6 +10,20 @@ AGENTS.md
 # Virtual environments
 .venv
 .deepeval/
+# Automated tests and their generated artifacts
+tests/
+test/
+test_*.py
+*_test.py
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+test-results/
+junit*.xml
 
 .env
 
@@ -21,7 +35,6 @@ reports/*.json
 reports/*smoke*.md
 
 Coating_Compass_Project_Brief.md
-!docs/Coating_Compass_Project_Brief.md
 
 data/dulux_canada_knowledge_sources/*.pdf
 data/dulux_canada_knowledge_sources/manifest.csv
@@ -31,8 +44,16 @@ data/dulux_canada_knowledge_sources/README.md
 data/dulux_canada_knowledge_sources/manifest.json
 
 # Project documentation
+# Keep all docs locally and update them; do not add them to Git.
+/docs/
+# Local tracking documents (kept on disk, excluded from version control)
+/docs/commit-plan.md
+/docs/evaluation-plan.md
+/docs/learning-log.md
+/docs/reference-repo-map.md
+/docs/session-log.md
+/docs/decisions/
 docs/
 Coating_Advisor_Reference_Repo_Codex_Handoff.md
-!docs/Coating_Advisor_Reference_Repo_Codex_Handoff.md
 docs/decisions
 docs/*.md

@@ -13,13 +13,14 @@ public manufacturer TDS and SDS documents. It is not endorsed by Dulux or PPG.
 - Use hosted models only; do not download local ML model weights on this machine.
 - Do not spend paid API credits, push, deploy, or change repository visibility without approval.
 - Update relevant project, learning, decision, and session documentation with meaningful changes.
+- Keep all documentation under `docs/` locally and continue updating it regularly; do not add it to Git. Do not add automated test files or generated test artifacts to Git unless the owner explicitly changes this preference.
 
 Current commands:
 
 - Install: `uv sync`
 - Validate sources/contextual inventory (offline): `uv run python -m src.data.contextualize_documents --dry-run`
 - Ingest baseline (hosted embedding calls; approval required): set `COATING_COMPASS_INGEST_ONLY=1`, then `uv run python main.py --retrieval-mode baseline-dense`
-- Test (offline): `uv run python -m unittest discover -s tests -v`
+- Automated test files were removed at the owner's request; do not recreate or run tests unless requested.
 - Lint: `uv tool run ruff check .` (use `uv --system-certs` on this Windows network)
 
 Coating Advisor repository instructions
