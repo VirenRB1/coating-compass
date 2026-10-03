@@ -397,10 +397,12 @@ def build_retriever(retrieval_mode: str = "auto"):
     )
 
 
-def create_rag_graph(retriever, system_prompt: str):
+def create_rag_graph(retriever, system_prompt: str, *, rate_limiter=None):
     """Create the smallest useful graph: retrieve evidence, then answer."""
 
     model = create_generator_model()
+    if rate_limiter is not None:
+        model.rate_limiter = rate_limiter
     prompt = ChatPromptTemplate.from_messages(
         [
             (

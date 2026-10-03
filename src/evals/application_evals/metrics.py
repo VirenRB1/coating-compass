@@ -26,7 +26,7 @@ METRIC_NAMES = [
 ]
 
 
-def build_full_pipeline_metrics(judge_model: str) -> list:
+def build_full_pipeline_metrics(judge_model: str, *, async_mode: bool = False) -> list:
     """Return fresh metric instances for one test case.
 
     DeepEval metric objects retain the most recent score and reason, so callers
@@ -34,17 +34,17 @@ def build_full_pipeline_metrics(judge_model: str) -> list:
     """
 
     return [
-        ContextualRecallMetric(model=judge_model, async_mode=False),
-        ContextualPrecisionMetric(model=judge_model, async_mode=False),
-        ContextualRelevancyMetric(model=judge_model, async_mode=False),
-        AnswerRelevancyMetric(model=judge_model, async_mode=False),
-        FaithfulnessMetric(model=judge_model, async_mode=False),
+        ContextualRecallMetric(model=judge_model, async_mode=async_mode),
+        ContextualPrecisionMetric(model=judge_model, async_mode=async_mode),
+        ContextualRelevancyMetric(model=judge_model, async_mode=async_mode),
+        AnswerRelevancyMetric(model=judge_model, async_mode=async_mode),
+        FaithfulnessMetric(model=judge_model, async_mode=async_mode),
         GEval(
             name="Answer Simplicity",
             _include_g_eval_suffix=False,
             model=judge_model,
             threshold=0.5,
-            async_mode=False,
+            async_mode=async_mode,
             evaluation_params=[
                 SingleTurnParams.INPUT,
                 SingleTurnParams.ACTUAL_OUTPUT,
@@ -62,7 +62,7 @@ def build_full_pipeline_metrics(judge_model: str) -> list:
             _include_g_eval_suffix=False,
             model=judge_model,
             threshold=0.5,
-            async_mode=False,
+            async_mode=async_mode,
             evaluation_params=[
                 SingleTurnParams.INPUT,
                 SingleTurnParams.ACTUAL_OUTPUT,

@@ -42,12 +42,6 @@ The baseline uses hosted embeddings and generation. It may incur API usage.
 
 ## Evaluation commands
 
-Deterministic tests:
-
-```powershell
-uv run python -m unittest discover -s tests -v
-```
-
 Validate golden-generation inputs without calling a model:
 
 ```powershell
@@ -241,3 +235,23 @@ metadata `bm25_implementation=langchain-bm25okapi-v2`. Its scoring differs from 
 handwritten v1 implementation; start a new BM25 evaluation rather than resuming v1.
 No retrieval quality improvement is claimed until the reviewed cases are rerun with
 cost approval. Dense collections and immutable source documents are unchanged.
+
+## Concurrent dense evaluation
+
+After approving hosted-model costs, compare baseline dense (A) and contextual
+dense (B) with one shared local Qdrant client:
+
+```powershell
+uv run python -m src.evals.application_evals.evaluate_dense_comparison --case-id manual_002 --label dense-smoke --workers 2
+uv run python -m src.evals.application_evals.evaluate_dense_comparison --label dense-full --workers 40
+```
+
+The configured generator produces answers; `COATING_COMPASS_EVALUATION_MODEL`
+selects the judge. This experiment uses Groq `openai/gpt-oss-20b` generation and
+GPT-5 mini judging. Questions run concurrently and each answer's seven DeepEval
+metrics run concurrently. Shared LangChain generator pacing defaults to three
+requests/minute; it is not an exact token limiter. Logs identify `[A]` and `[B]`
+progress. JSON checkpoints retain generated answers and each completed metric;
+`--resume-a` and `--resume-b` resume partial work without repeating successful
+judgments. See [the evaluation plan](docs/evaluation-plan.md) for model controls,
+reproduction, limitations, and live terminal monitoring.

@@ -6,6 +6,7 @@ it is intentionally separate from deterministic tests.
 """
 
 import argparse
+import asyncio
 import hashlib
 import json
 import os
@@ -17,8 +18,6 @@ from pathlib import Path
 from typing import Any
 
 import truststore
-from deepeval import evaluate
-from deepeval.evaluate import AsyncConfig, CacheConfig
 from deepeval.test_case import LLMTestCase
 from dotenv import load_dotenv
 
@@ -218,6 +217,45 @@ def invoke_rag_with_backoff(rag_graph, question: str, attempts: int = 4):
             time.sleep(delay)
 
 
+async def measure_case_metrics(test_case, metrics, case_output, *, timeout, prefix, checkpoint=None):
+    """Run independent DeepEval async metrics together; retain partial failures."""
+    async def measure(metric):
+        name = metric.__name__
+        saved = case_output["metrics"].get(name)
+        if saved and saved.get("error") is None and saved.get("score") is not None:
+            return
+        if not str(test_case.actual_output).strip() and name in {
+            "Answer Relevancy", "Faithfulness", "Answer Simplicity", "Answer Correctness"
+        }:
+            case_output["metrics"][name] = empty_answer_metric(name)
+        else:
+            print(f"{prefix} judge started: {name}", flush=True)
+            try:
+                await asyncio.wait_for(
+                    metric.a_measure(test_case, _show_indicator=False,
+                                     _log_metric_to_confident=False), timeout=timeout,
+                )
+                case_output["metrics"][name] = serialize_metric(metric)
+                case_output["metrics"][name]["evaluation_cost"] = metric.evaluation_cost
+            except Exception as error:
+                case_output["metrics"][name] = {
+                    "score": None, "threshold": metric.threshold, "success": False,
+                    "reason": None, "error": f"{type(error).__name__}: {error}",
+                }
+                if checkpoint:
+                    checkpoint(case_output)
+                print(f"{prefix} judge failed: {name}: {type(error).__name__}", flush=True)
+                raise
+        if checkpoint:
+            checkpoint(case_output)
+        print(f"{prefix} judge finished: {name}={case_output['metrics'][name]['score']}", flush=True)
+
+    results = await asyncio.gather(*(measure(metric) for metric in metrics), return_exceptions=True)
+    errors = [result for result in results if isinstance(result, Exception)]
+    if errors:
+        raise RuntimeError(f"{len(errors)} metric(s) failed: {errors[0]}") from errors[0]
+
+
 def evaluate_case(
     *,
     case_id: str,
@@ -225,55 +263,46 @@ def evaluate_case(
     rag_graph,
     judge_model: str,
     hyperparameters: dict[str, Any],
+    checkpoint=None,
+    existing_case=None,
 ) -> dict[str, Any]:
     """Run retrieval, generation, and all metrics for one golden case."""
 
-    rag_result = invoke_rag_with_backoff(rag_graph, golden["question"])
-    retrieval_context = render_retrieval_context(rag_result["documents"])
+    prefix = f"{hyperparameters.get('progress_prefix', '')} {case_id}".strip()
+    if existing_case is None:
+        print(f"{prefix} queued for retrieval/generation", flush=True)
+        rag_result = invoke_rag_with_backoff(rag_graph, golden["question"])
+        retrieval_context = render_retrieval_context(rag_result["documents"])
+        case_output = {
+            "case_id": case_id, "question": golden["question"],
+            "expected_answer": golden["expected_answer"], "actual_answer": rag_result["answer"],
+            "expected_context": golden["expected_context"],
+            "retrieval_context": retrieval_context, "metrics": {},
+        }
+        print(f"{prefix} generation finished: {len(str(rag_result['answer']))} answer characters", flush=True)
+    else:
+        if existing_case["question"] != golden["question"]:
+            raise ValueError("Saved case question does not match the golden dataset.")
+        case_output = existing_case
+        print(f"{prefix} reusing checkpointed answer and completed metrics", flush=True)
+    if checkpoint:
+        checkpoint(case_output)
     test_case = LLMTestCase(
-        input=golden["question"],
-        actual_output=rag_result["answer"],
-        expected_output=golden["expected_answer"],
-        context=golden["expected_context"],
-        retrieval_context=retrieval_context,
-        name=case_id,
+        input=golden["question"], actual_output=case_output["actual_answer"],
+        expected_output=golden["expected_answer"], context=golden["expected_context"],
+        retrieval_context=case_output["retrieval_context"], name=case_id,
     )
-    case_output = {
-        "case_id": case_id,
-        "question": golden["question"],
-        "expected_answer": golden["expected_answer"],
-        "actual_answer": rag_result["answer"],
-        "expected_context": golden["expected_context"],
-        "retrieval_context": retrieval_context,
-        "metrics": {},
-    }
 
-    # A separate call gives each metric its own DeepEval deadline. Keeping the
-    # metrics sequential within a case also bounds total judge concurrency.
-    for metric in build_full_pipeline_metrics(judge_model):
-        metric_name = metric.__name__
-        if not str(rag_result["answer"]).strip() and metric_name in {
-            "Answer Relevancy",
-            "Faithfulness",
-            "Answer Simplicity",
-            "Answer Correctness",
-        }:
-            case_output["metrics"][metric_name] = empty_answer_metric(metric_name)
-            print(f"Recorded {case_id} {metric_name}=0: empty generator answer")
-            continue
-        result = evaluate(
-            test_cases=[test_case],
-            metrics=[metric],
-            hyperparameters=hyperparameters,
-            async_config=AsyncConfig(run_async=False),
-            cache_config=CacheConfig(write_cache=True, use_cache=True),
-        )
-        metric_result = result.test_results[0].metrics_data[0]
-        case_output["metrics"][metric_name] = serialize_metric(metric_result)
-        print(
-            f"Finished {case_id} metric "
-            f"{len(case_output['metrics'])}/7: {metric_name}"
-        )
+    # HTTP judging needs sockets only. On Windows, avoid Proactor completion
+    # callbacks racing with per-worker loop teardown (WinError 995/InvalidState).
+    asyncio.run(
+        measure_case_metrics(
+            test_case, build_full_pipeline_metrics(judge_model, async_mode=True), case_output,
+            timeout=hyperparameters.get("metric_timeout_seconds", 300),
+            prefix=prefix, checkpoint=checkpoint,
+        ),
+        loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None,
+    )
     return case_output
 
 
@@ -401,6 +430,7 @@ def main() -> None:
         "generator_reasoning_effort": generator_config.get("reasoning_effort"),
         "judge_model": judge_model,
         "retrieval_k": RETRIEVAL_K,
+        "metric_timeout_seconds": args.metric_timeout_seconds,
     }
     completed_ids = {case["case_id"] for case in output["cases"]}
     pending_goldens = [
