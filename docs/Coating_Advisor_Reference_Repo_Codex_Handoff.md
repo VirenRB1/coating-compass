@@ -4,7 +4,7 @@ This document is durable context for a Codex coding session working on the **Coa
 
 Read this document together with:
 
-- `docs/Coating_Advisor_Codex_Project_Brief.md` — the full product, domain, safety, data, architecture, and learning brief;
+- `docs/Coating_Compass_Project_Brief.md` — the full product, domain, safety, data, architecture, and learning brief;
 - the current repository's root `AGENTS.md` — the short, always-active operating rules;
 - the current repository's `README.md`, source tree, tests, Git status, and Git history;
 - `docs/reference-repo-map.md`, `docs/commit-plan.md`, `docs/learning-log.md`, `docs/session-log.md`, and `docs/decisions/`, once they exist.
@@ -675,7 +675,7 @@ Copy and paste the following after placing the documents in the repository:
 Work as my technical mentor and implementation partner on the Coating Advisor learning project.
 
 First read all active AGENTS.md files and then read these documents completely:
-- docs/Coating_Advisor_Codex_Project_Brief.md
+- docs/Coating_Compass_Project_Brief.md
 - docs/Coating_Advisor_Reference_Repo_Codex_Handoff.md
 - docs/reference-repo-map.md, if it exists
 - docs/commit-plan.md, if it exists
@@ -717,10 +717,10 @@ The most reliable method is to transfer the durable facts and instructions as ve
 ### Recommended method
 
 1. Download these two documents:
-   - `Coating_Advisor_Codex_Project_Brief.md`
+   - `Coating_Compass_Project_Brief.md`
    - `Coating_Advisor_Reference_Repo_Codex_Handoff.md`
 2. Place them in your repository:
-   - `docs/Coating_Advisor_Codex_Project_Brief.md`
+   - `docs/Coating_Compass_Project_Brief.md`
    - `docs/Coating_Advisor_Reference_Repo_Codex_Handoff.md`
 3. Create a concise root `AGENTS.md` using the companion template.
 4. Commit these context files so every clone and later session can use the same instructions.
@@ -815,3 +815,11 @@ At any point, the owner should be able to answer:
 The finished portfolio story should be earned through the repository history: a basic RAG baseline, a reviewed coating benchmark, controlled retrieval experiments, structured recommendation behavior, domain safety metrics, reproducible experiments, regression gates, a typed API and useful UI, responsible observability, and a deliberately chosen deployment path.
 
 The goal is not merely a working demo. The goal is a system the owner understands deeply enough to rebuild, defend, test, and extend without relying on hidden work.
+
+## Framework-first rule (2026-10-03)
+
+Prefer maintained LangChain and LangGraph components over handwritten infrastructure
+when they satisfy safety and evidence requirements. Retain coating validation,
+original-only evidence boundaries, deterministic safety rules, and behavior the
+frameworks cannot supply. Choose the least code the owner can clearly explain.
+See decision 0002 for the repository-wide review.

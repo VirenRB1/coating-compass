@@ -12,14 +12,13 @@ from deepeval.test_case import LLMTestCase
 from dotenv import load_dotenv
 
 from src.app.basic_rag import (
-    RETRIEVAL_K,
     RETRIEVAL_MODES,
     build_retriever,
     create_rag_graph,
     retrieval_metadata,
 )
+from src.app.evidence import render_retrieval_context
 from src.app.prompt_registry import fetch_baseline_prompt
-
 
 GOLDENS_PATH = Path("data/evaluations/manual_golden_dataset.json")
 RESULTS_DIRECTORY = Path("data/evaluations/results")
@@ -177,6 +176,8 @@ def main() -> None:
             raise ValueError("Cannot resume: Langfuse prompt version has changed.")
         if output["run"].get("collection") != retrieval_config["collection"]:
             raise ValueError("Cannot resume: retrieval mode has changed.")
+        if output["run"].get("bm25_implementation") != retrieval_config["bm25_implementation"]:
+            raise ValueError("Cannot resume: BM25 implementation has changed.")
         print(f"Resuming {len(output['cases'])}/20 cases from {output_path}")
     else:
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -207,11 +208,7 @@ def main() -> None:
         rag_result = rag_graph.invoke(
             {"question": golden["question"], "documents": [], "answer": ""}
         )
-        retrieval_context = [
-            f"Source: {document.metadata['source_filename']}, "
-            f"page {document.metadata['page_number']}\n{document.page_content}"
-            for document in rag_result["documents"]
-        ]
+        retrieval_context = render_retrieval_context(rag_result["documents"])
         pending.append(
             LLMTestCase(
                 input=golden["question"],

@@ -36,8 +36,8 @@ def write_markdown_report(output_path: Path, result: dict[str, Any]) -> None:
     lines = [
         "# Full Pipeline Evaluation",
         "",
-        "DeepEval scores use a 0-1 scale. GEval scores are model judgments and "
-        "must be reviewed alongside their reasons and coating-domain checks.",
+        ("DeepEval scores use a 0-1 scale. GEval scores are model judgments and "
+         "must be reviewed alongside their reasons and coating-domain checks."),
         "",
         "## Run metadata",
         "",

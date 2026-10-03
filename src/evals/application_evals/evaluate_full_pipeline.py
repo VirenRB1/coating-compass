@@ -31,6 +31,7 @@ from src.app.basic_rag import (
     retrieval_metadata,
     retrieval_name,
 )
+from src.app.evidence import render_retrieval_context
 from src.app.prompt_registry import fetch_baseline_prompt
 from src.evals.application_evals.metrics import build_full_pipeline_metrics
 from src.evals.application_evals.reporting import (
@@ -38,7 +39,6 @@ from src.evals.application_evals.reporting import (
     write_json_report,
     write_markdown_report,
 )
-
 
 GOLDENS_PATH = Path("data/evaluations/manual_golden_dataset.json")
 REPORTS_DIRECTORY = Path("reports")
@@ -165,17 +165,9 @@ def validate_resume_retrieval(
     saved_mode = run.get("retrieval_mode")
     if saved_mode is not None and saved_mode != retrieval_config["retrieval_mode"]:
         raise ValueError("Cannot resume: retrieval mode has changed.")
-    for setting in ("retrieval_k", "bm25_k1", "bm25_b"):
+    for setting in ("retrieval_k", "bm25_k1", "bm25_b", "bm25_implementation"):
         if run.get(setting) != retrieval_config[setting]:
             raise ValueError(f"Cannot resume: {setting} has changed.")
-
-
-def render_retrieval_context(documents: list) -> list[str]:
-    return [
-        f"Source: {document.metadata['source_filename']}, "
-        f"page {document.metadata['page_number']}\n{document.page_content}"
-        for document in documents
-    ]
 
 
 def close_retriever(retriever) -> None:

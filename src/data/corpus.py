@@ -9,7 +9,6 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
-
 SOURCE_DIRECTORY = Path("data/dulux_canada_knowledge_sources")
 MANIFEST_PATH = SOURCE_DIRECTORY / "manifest.json"
 CHUNK_SIZE = 1_000

@@ -15,7 +15,6 @@ from deepeval.metrics import (
 )
 from deepeval.test_case import SingleTurnParams
 
-
 METRIC_NAMES = [
     "Contextual Recall",
     "Contextual Precision",

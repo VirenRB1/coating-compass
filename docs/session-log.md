@@ -187,3 +187,54 @@
   and correctness 0.700. Retrieval still missed the intended X-PERT 22010 evidence,
   so product selection remains a separate retrieval problem rather than a generator
   availability failure.
+
+## 2026-10-03 - Framework-first repository simplification
+
+- Goal: owner requested LangChain BM25 replacement, original-only manufacturer
+  evidence, repository-wide simplification, and a durable framework-first rule.
+- Starting state: clean staged/unstaged diffs on master at dfda785. Inspected Git,
+  source/config/tests, README, project brief (actual Compass filename), handoff,
+  tracking notes, and existing contextual evidence decision before editing.
+- Replaced handwritten BM25 scoring with BM25Retriever/rank-bm25 plus LangChain
+  Runnable composition for lexical-overlap filtering and original Document output.
+  Removed the embeddings HTTP adapter in favor of OpenAIEmbeddings; disabled token
+  splitting to preserve literal inputs. Removed unused direct requests dependency.
+- Consolidated original-only citation formatting across the graph and all eval paths.
+  Versioned BM25 identity as v2 and blocked v1 resumes by implementation metadata.
+  Applied safe Ruff import/syntax cleanup repository-wide; preserved strict JSON
+  validation, quota routing, source checks, and checkpoint/error contracts.
+- Updated AGENTS.md, README, project brief, handoff, learning log, commit plan,
+  reference map, decision 0001, and new decision 0002 (repository-wide audit).
+  Corrected stale brief path and obsolete local command examples in AGENTS.md.
+- Verification: all 24 deterministic unittest tests passed; git diff --check passed.
+  Source/contextual dry run validated 36 documents and 921 chunks (921 complete,
+  zero unresolved), without writes. Offline real-corpus BM25 smoke returned five
+  X-PERT 22010 TDS/SDS chunks with source hash/page/URL metadata; unknown query
+  returned []. New graph test proves synthetic context is absent from evidence sent
+  to the fake generator. Tests verify ID collision/stale artifact rejection and v1
+  resume refusal. No hosted model calls, local model weights, or index rebuilds.
+- Lint: safe fixes applied. Full Ruff check still reports seven pre-existing rules:
+  four TRY004 preferences for validation exception types and three BLE001 findings
+  at explicit failure checkpoint/report boundaries. No suppressions were added;
+  changing exception contracts belongs in a separate reviewed increment.
+- Environment: uv first hit cache permissions, then private TLS issuer rejection;
+  approved escalated uv --system-certs installed/locked the requested dependencies.
+  pypdf emitted existing optional-fontTools warnings; corpus inventory is unchanged.
+- Files changed: application BM25/evidence/embeddings; evaluation evidence/resume
+  paths and reporting; focused tests; pyproject.toml/uv.lock; documentation above;
+  import-only cleanup in remaining source modules and main.py.
+- Existing ignore rules exclude root AGENTS.md and decision files. Edits are saved
+  locally and the framework rule is also in tracked project docs. No staging,
+  commit, push, deployment, visibility change, or ignore-policy change performed.
+- Next step: review this diff, then authorize a fresh targeted BM25-v2 comparison
+  against the reviewed goldens. Scoring differs from v1; no quality gain claimed.
+- Last verified commit remains dfda785; this increment is uncommitted.
+
+### Commit verification and owner authorization
+
+The owner authorized a local commit after reviewing the implementation summary.
+Reran all 24 offline tests successfully; diff whitespace checks passed. Ruff still
+reports the same seven pre-existing TRY004/BLE001 findings. Include the reviewed
+AGENTS.md and both decision documents explicitly despite existing broad ignore
+rules; no secrets, PDFs, generated data, or vector stores are included. The next
+step remains a separately approved BM25-v2 retrieval-quality evaluation. No push.

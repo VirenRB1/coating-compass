@@ -15,7 +15,6 @@ from src.evals.application_evals.evaluate_full_pipeline import (
     validate_resume_input,
 )
 
-
 VALID_GOLDENS = [
     {
         "question": "Which coating system is supported?",

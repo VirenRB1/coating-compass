@@ -6,7 +6,6 @@ import truststore
 from dotenv import load_dotenv
 from langfuse import get_client
 
-
 PROMPT_NAME = "coating_compass_baseline_prompt"
 PROMPT_LABEL = "baseline"
 REQUIRED_LANGFUSE_VARIABLES = (

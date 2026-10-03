@@ -6,14 +6,14 @@ import uuid
 from pathlib import Path
 from typing import TypedDict
 
-import requests
 import truststore
 from dotenv import load_dotenv
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import Runnable
 from langchain_groq import ChatGroq
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from langgraph.graph import END, START, StateGraph
 from qdrant_client import QdrantClient
@@ -21,12 +21,19 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 
 from src.app.contextual_bm25 import (
     DEFAULT_B as BM25_B,
+)
+from src.app.contextual_bm25 import (
     DEFAULT_K1 as BM25_K1,
+)
+from src.app.contextual_bm25 import (
     ContextualBM25Retriever,
 )
+from src.app.evidence import render_retrieval_context
 from src.app.prompt_registry import fetch_baseline_prompt
 from src.data.contextualize_documents import (
     MANIFEST_PATH as CONTEXTUAL_MANIFEST_PATH,
+)
+from src.data.contextualize_documents import (
     PROMPT_HASH,
     read_latest_records,
     valid_success,
@@ -38,11 +45,10 @@ from src.data.corpus import (
     stable_chunk_id,
 )
 
-
 VECTOR_STORE_DIRECTORY = Path("data/vector_store/qdrant")
 BASELINE_COLLECTION_NAME = "coating-compass-baseline-v1"
 CONTEXTUAL_COLLECTION_NAME = "coating-compass-contextual-dense-v1"
-CONTEXTUAL_BM25_NAME = "coating-compass-contextual-bm25-v1"
+CONTEXTUAL_BM25_NAME = "coating-compass-contextual-bm25-v2"
 RETRIEVAL_MODES = (
     "auto",
     "baseline-dense",
@@ -80,31 +86,6 @@ class RAGState(TypedDict):
     question: str
     documents: list[Document]
     answer: str
-
-
-class OpenAIEmbeddingAdapter(Embeddings):
-    """Expose OpenAI embeddings through LangChain's embedding interface."""
-
-    def __init__(self, model: str) -> None:
-        self.model = model
-        self.api_key = os.environ["OPENAI_API_KEY"]
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return self._embed(texts)
-
-    def embed_query(self, text: str) -> list[float]:
-        return self._embed([text])[0]
-
-    def _embed(self, texts: list[str]) -> list[list[float]]:
-        response = requests.post(
-            "https://api.openai.com/v1/embeddings",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            json={"model": self.model, "input": texts},
-            timeout=60,
-        )
-        response.raise_for_status()
-        data = sorted(response.json()["data"], key=lambda item: item["index"])
-        return [item["embedding"] for item in data]
 
 
 def load_and_split_documents() -> list[Document]:
@@ -176,7 +157,7 @@ def generator_model_config() -> dict:
         "timeout": 30,
         "max_retries": 2,
     }
-    if model.startswith("openai/gpt-oss-") or model.startswith("gpt-5"):
+    if model.startswith(("openai/gpt-oss-", "gpt-5")):
         config["reasoning_effort"] = os.getenv(
             "COATING_COMPASS_GENERATOR_REASONING_EFFORT", "low"
         )
@@ -248,7 +229,7 @@ def load_complete_contextual_documents() -> list[tuple[str, Document, str]]:
     return contextual_documents
 
 
-def build_contextual_bm25_retriever() -> ContextualBM25Retriever:
+def build_contextual_bm25_retriever() -> Runnable[str, list[Document]]:
     """Build a local lexical index from the complete contextual artifact."""
 
     # The loader returns (stable ID, original Document, context + original text).
@@ -259,7 +240,7 @@ def build_contextual_bm25_retriever() -> ContextualBM25Retriever:
 
 
 def create_qdrant_store(
-    client: QdrantClient, collection_name: str, embeddings: OpenAIEmbeddingAdapter
+    client: QdrantClient, collection_name: str, embeddings: Embeddings
 ) -> QdrantVectorStore:
     if not client.collection_exists(collection_name):
         client.create_collection(
@@ -277,7 +258,7 @@ def create_qdrant_store(
 
 
 def build_baseline_vector_store(
-    client: QdrantClient, embeddings: OpenAIEmbeddingAdapter, embedding_model: str
+    client: QdrantClient, embeddings: Embeddings, embedding_model: str
 ) -> QdrantVectorStore:
     vector_store = create_qdrant_store(
         client, BASELINE_COLLECTION_NAME, embeddings
@@ -308,7 +289,7 @@ def build_baseline_vector_store(
 
 
 def build_contextual_vector_store(
-    client: QdrantClient, embeddings: OpenAIEmbeddingAdapter
+    client: QdrantClient, embeddings: Embeddings
 ) -> QdrantVectorStore:
     contextual_documents = load_complete_contextual_documents()
     vector_store = create_qdrant_store(
@@ -380,6 +361,7 @@ def retrieval_metadata(retrieval_mode: str) -> dict:
         "collection": None if is_bm25 else DENSE_COLLECTIONS[resolved],
         "bm25_k1": BM25_K1 if is_bm25 else None,
         "bm25_b": BM25_B if is_bm25 else None,
+        "bm25_implementation": "langchain-bm25okapi-v2" if is_bm25 else None,
     }
 
 
@@ -390,7 +372,10 @@ def build_vector_store(retrieval_mode: str = "auto") -> QdrantVectorStore:
     embedding_model = os.getenv(
         "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
     )
-    embeddings = OpenAIEmbeddingAdapter(model=embedding_model)
+    embeddings = OpenAIEmbeddings(
+        model=embedding_model, check_embedding_ctx_length=False,
+        request_timeout=60, max_retries=2,
+    )
     VECTOR_STORE_DIRECTORY.mkdir(parents=True, exist_ok=True)
     client = QdrantClient(path=str(VECTOR_STORE_DIRECTORY))
     if resolved == "contextual-dense":
@@ -424,8 +409,8 @@ def create_rag_graph(retriever, system_prompt: str):
             ),
             (
                 "human",
-                "Question:\n{question}\n\nRetrieved evidence:\n{context}\n\n"
-                "Return an answer, important limitations, and sources.",
+                ("Question:\n{question}\n\nRetrieved evidence:\n{context}\n\n"
+                 "Return an answer, important limitations, and sources."),
             ),
         ]
     )
@@ -436,11 +421,7 @@ def create_rag_graph(retriever, system_prompt: str):
         return {"documents": documents}
 
     def generate(state: RAGState) -> dict:
-        context_parts = []
-        for document in state["documents"]:
-            source = document.metadata["source_filename"]
-            page = document.metadata["page_number"]
-            context_parts.append(f"Source: {source}, page {page}\n{document.page_content}")
+        context_parts = render_retrieval_context(state["documents"])
 
         messages = prompt.invoke(
             {

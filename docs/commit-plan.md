@@ -55,3 +55,16 @@
 - Ignore raw PDFs, vector stores, result JSON, and transient tool state.
 - Preserve the reviewed Markdown evaluation report as human-readable evidence.
 - Suggested commit: `refactor: organize rag and evaluation modules`
+
+## Milestone: framework-first simplification (2026-10-03)
+
+- Status: verified; owner authorized the local commit.
+- Owner requested repository-wide simplification and LangChain BM25 replacement.
+- Scope: BM25Retriever plus evidence boundary, OpenAIEmbeddings, shared citation
+  rendering, safe import/syntax cleanup, framework-first instructions and audit.
+- Acceptance: original text/metadata preserved; zero-overlap queries return []; stale
+  artifacts and v1 BM25 resumes fail; offline tests pass; paid evaluation remains separate.
+- BM25 v2 rankings require fresh comparison with the reviewed cases before promotion.
+- Suggested commit: `refactor: use LangChain retrieval and embeddings with original evidence`
+- Include root AGENTS.md and decision files explicitly in the authorized commit;
+  existing broad ignore rules remain unchanged.

@@ -1,15 +1,17 @@
 import unittest
+from unittest.mock import patch
 
 from langchain_core.documents import Document
 
-from src.app.contextual_bm25 import (
-    ContextualBM25Retriever,
-    tokenize,
-)
 from src.app.basic_rag import (
+    build_contextual_bm25_retriever,
     resolve_retrieval_mode,
     retrieval_metadata,
     retrieval_name,
+)
+from src.app.contextual_bm25 import (
+    ContextualBM25Retriever,
+    tokenize,
 )
 
 
@@ -22,7 +24,7 @@ class ContextualBM25RetrieverTests(unittest.TestCase):
         )
         self.assertEqual(
             retrieval_name("contextual-bm25"),
-            "coating-compass-contextual-bm25-v1",
+            "coating-compass-contextual-bm25-v2",
         )
 
     def test_unknown_retrieval_mode_fails_fast(self) -> None:
@@ -38,6 +40,7 @@ class ContextualBM25RetrieverTests(unittest.TestCase):
                 "collection": None,
                 "bm25_k1": 1.5,
                 "bm25_b": 0.75,
+                "bm25_implementation": "langchain-bm25okapi-v2",
             },
         )
 
@@ -129,7 +132,7 @@ class ContextualBM25RetrieverTests(unittest.TestCase):
     def test_tokenization_is_case_insensitive_and_keeps_product_numbers(self) -> None:
         self.assertEqual(tokenize("X-PERT 22010/01"), ["x", "pert", "22010", "01"])
 
-    def test_equal_scores_are_sorted_by_stable_chunk_id(self) -> None:
+    def test_ties_are_reproducible_across_input_order(self) -> None:
         chunk_b = Document(page_content="Second by stable ID.")
         chunk_a = Document(page_content="First by stable ID.")
         retriever = ContextualBM25Retriever(
@@ -139,7 +142,11 @@ class ContextualBM25RetrieverTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(retriever.invoke("shared"), [chunk_a, chunk_b])
+        reverse = ContextualBM25Retriever(
+            [("chunk-a", chunk_a, "shared term"), ("chunk-b", chunk_b, "shared term")]
+        )
+        self.assertCountEqual(retriever.invoke("shared"), [chunk_a, chunk_b])
+        self.assertEqual(retriever.invoke("shared"), reverse.invoke("shared"))
 
     def test_invalid_configuration_fails_fast(self) -> None:
         corpus = [
@@ -154,6 +161,34 @@ class ContextualBM25RetrieverTests(unittest.TestCase):
             ContextualBM25Retriever(
                 [("chunk-id", Document(page_content="Evidence."), "---")]
             )
+
+    def test_duplicate_ids_cannot_replace_original_evidence(self) -> None:
+        with self.assertRaisesRegex(ValueError, "unique"):
+            ContextualBM25Retriever([
+                ("same", Document(page_content="First source."), "context"),
+                ("same", Document(page_content="Different source."), "context"),
+            ])
+
+    def test_filtering_happens_before_top_k_even_with_negative_scores(self) -> None:
+        matching = Document(page_content="Original matching source.")
+        unrelated = Document(page_content="Unrelated source.")
+        retriever = ContextualBM25Retriever([
+            ("a", matching, "common"),
+            ("b", matching, "common"),
+            ("c", unrelated, "unrelated"),
+        ], k=1)
+        self.assertEqual(retriever.invoke("common"), [matching])
+        self.assertEqual(retriever.invoke("---"), [])
+
+    def test_builder_validates_artifacts_before_constructing_ranker(self) -> None:
+        with (
+            patch("src.app.basic_rag.load_complete_contextual_documents",
+                  side_effect=ValueError("stale artifact")),
+            patch("src.app.contextual_bm25.BM25Retriever.from_documents") as ranker,
+            self.assertRaisesRegex(ValueError, "stale artifact"),
+        ):
+            build_contextual_bm25_retriever()
+        ranker.assert_not_called()
 
 
 if __name__ == "__main__":

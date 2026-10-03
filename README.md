@@ -177,7 +177,7 @@ must not be committed.
 
 ## Contextual BM25 retrieval
 
-The dependency-free BM25 retriever follows Anthropic's Contextual BM25 pattern: it
+LangChain's `BM25Retriever` (using `rank-bm25`) follows Anthropic's Contextual BM25 pattern: it
 indexes each generated chunk context followed by the original manufacturer chunk.
 Search results still contain only the unchanged manufacturer text and its citation
 metadata, so synthetic context cannot become answer evidence.
@@ -191,10 +191,14 @@ retriever = build_contextual_bm25_retriever()
 documents = retriever.invoke("waterborne alkyd 22010 trim")
 ```
 
-The index makes no network calls and writes no files. It returns only positive-score
-matches; an out-of-corpus query can therefore return no evidence instead of filling
-the result set with zero-score chunks. The active application remains on contextual
-dense retrieval until BM25 and a later hybrid rank-fusion experiment are evaluated
+The index makes no network calls and writes no files. A small LangChain Runnable
+boundary filters candidates without query-term overlap
+before limiting to the requested K and restores the original Documents with all
+source metadata. Unknown or punctuation-only queries return no evidence. This is
+an overlap guard, not a relevance or safety guarantee. BM25Okapi can assign zero
+or negative scores to matching chunks, so positive-score filtering is unsuitable.
+
+The active application remains on contextual dense retrieval until BM25 and a later hybrid rank-fusion experiment are evaluated
 against the same reviewed cases.
 
 Select a retrieval architecture explicitly in the application or any evaluation
@@ -217,9 +221,23 @@ BM25 evaluation metadata also records `retrieval_k`, `bm25_k1`, and `bm25_b`, wh
 its Qdrant `collection` is `null` because the index is built in memory from the
 validated local contextual artifact.
 
-IMPORTANT INFORMATION
+## Framework-first engineering
 
->> Prefer simple, maintained LangChain and LangGraph components over handwritten framework or retrieval infrastructure when they satisfy the project’s
->> safety and evidence requirements. Keep custom code only for coating-specific validation, evidence boundaries, deterministic safety rules, or behavior
->> unavailable from the framework. Optimize for the least code the owner can clearly explain.
->>
+Prefer maintained LangChain and LangGraph components over handwritten infrastructure
+when they satisfy the project's safety and evidence requirements. Keep custom code
+for coating-specific validation, original-only evidence boundaries, deterministic
+safety rules, and behavior unavailable from the frameworks. Choose the least code
+the owner can clearly explain.
+
+BM25 ranking uses LangChain; embeddings use `OpenAIEmbeddings` with automatic token
+splitting disabled to preserve the prior embedding input. App and evaluation paths
+share original-only citation rendering. Hash validation, contextual artifact
+checkpoints, original-text Qdrant payloads, evaluation identity checks, and domain
+rules remain explicit. See [the simplification decision](docs/decisions/0002-framework-first-simplification.md)
+for the repository-wide review and trade-offs.
+
+BM25 now has retrieval identity `coating-compass-contextual-bm25-v2` and evaluation
+metadata `bm25_implementation=langchain-bm25okapi-v2`. Its scoring differs from the
+handwritten v1 implementation; start a new BM25 evaluation rather than resuming v1.
+No retrieval quality improvement is claimed until the reviewed cases are rerun with
+cost approval. Dense collections and immutable source documents are unchanged.

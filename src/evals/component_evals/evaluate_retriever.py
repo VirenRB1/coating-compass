@@ -22,7 +22,7 @@ from src.app.basic_rag import (
     build_retriever,
     retrieval_metadata,
 )
-
+from src.app.evidence import render_retrieval_context
 
 GOLDENS_PATH = Path("data/evaluations/manual_golden_dataset.json")
 RESULTS_DIRECTORY = Path("data/evaluations/results")
@@ -153,11 +153,7 @@ def main() -> None:
     test_cases = []
     for index, golden in indexed_goldens:
         documents = retriever.invoke(golden["question"])
-        retrieval_context = [
-            f"Source: {document.metadata['source_filename']}, "
-            f"page {document.metadata['page_number']}\n{document.page_content}"
-            for document in documents
-        ]
+        retrieval_context = render_retrieval_context(documents)
         test_cases.append(
             LLMTestCase(
                 input=golden["question"],

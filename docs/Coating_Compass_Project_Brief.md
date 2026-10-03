@@ -510,7 +510,7 @@ Containers: Docker after a working local baseline.
 
 CI: GitHub Actions after tests and evaluation subsets exist.
 
-LangChain may be used for useful integrations, but keep domain models and core logic independent of framework-specific classes. Do not introduce LangGraph until the workflow genuinely needs explicit state, branching, resumption, or durable orchestration.
+Prefer maintained LangChain and LangGraph components over handwritten infrastructure when they satisfy safety and evidence requirements. Keep domain models, coating-specific validation, original-only evidence boundaries, deterministic safety rules, and behavior unavailable from the frameworks explicit. Choose the least code the owner can clearly explain. Use LangGraph where explicit state or workflow control is useful; do not introduce orchestration for demonstration alone.
 
 Resource constraints
 

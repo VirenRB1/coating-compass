@@ -257,3 +257,23 @@ answer, although retrieval still supplied the wrong product evidence.
 Do not retry empty generations until one happens to pass and call that an evaluation
 improvement. Change one recorded configuration variable, rerun the same case, and
 keep retrieval failures distinct from generation failures.
+
+## 2026-10-03 - Framework components and evidence boundaries
+
+BM25 measures lexical relevance; LangChain now owns its scoring, while a small
+Runnable boundary controls what counts as answer evidence. Generated context can
+help retrieve a source but cannot become a manufacturer claim. BM25Okapi can give
+matching chunks zero/negative scores, so we filter by lexical overlap before taking
+K. This differs from the handwritten positive-IDF formula; v2 needs fresh evaluation.
+
+OpenAIEmbeddings replaces HTTP plumbing with the maintained provider integration.
+Disabling automatic input token splitting preserves literal embedding inputs and
+avoids an incidental tokenizer download. Existing hashes, IDs, checkpoints, quota
+controls, and original-text vector payloads remain explicit because frameworks do
+not supply these domain guarantees. See decision 0002 for alternatives and the audit.
+
+Commands: `uv sync`, `uv run python -m unittest discover -s tests -v`, and
+`uv run python -m src.data.contextualize_documents --dry-run` (no paid calls).
+Dependency TLS failure: use `uv --system-certs sync`; never disable verification.
+Teach-back: why can retrieval use synthetic text while the generator receives only
+original manufacturer evidence?

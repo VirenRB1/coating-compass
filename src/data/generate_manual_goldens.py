@@ -6,12 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
-
 
 SOURCE_DIRECTORY = Path("data/dulux_canada_knowledge_sources")
 DEFAULT_REQUESTS_PATH = Path("data/evaluations/golden_generation_requests.json")

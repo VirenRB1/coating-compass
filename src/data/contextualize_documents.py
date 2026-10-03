@@ -34,7 +34,6 @@ from src.data.corpus import (
     stable_chunk_id,
 )
 
-
 KB_VERSION = "contextual-dense-v1"
 GROQ_MODEL = "openai/gpt-oss-20b"
 OPENAI_MODEL = "gpt-5-mini"
