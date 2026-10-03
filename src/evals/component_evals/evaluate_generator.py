@@ -11,7 +11,13 @@ from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
 from deepeval.test_case import LLMTestCase
 from dotenv import load_dotenv
 
-from src.app.basic_rag import COLLECTION_NAME, RETRIEVAL_K, build_vector_store, create_rag_graph
+from src.app.basic_rag import (
+    RETRIEVAL_K,
+    RETRIEVAL_MODES,
+    build_retriever,
+    create_rag_graph,
+    retrieval_metadata,
+)
 from src.app.prompt_registry import fetch_baseline_prompt
 
 
@@ -24,6 +30,9 @@ METRIC_NAMES = ["Answer Relevancy", "Faithfulness"]
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate the baseline generator.")
     parser.add_argument("--label", default="baseline")
+    parser.add_argument(
+        "--retrieval-mode", choices=RETRIEVAL_MODES, default="auto"
+    )
     return parser.parse_args()
 
 
@@ -139,7 +148,10 @@ def main() -> None:
     load_dotenv()
     goldens = json.loads(GOLDENS_PATH.read_text(encoding="utf-8"))
     prompt_version = fetch_baseline_prompt()
-    rag_graph = create_rag_graph(build_vector_store(), prompt_version.text)
+    retrieval_config = retrieval_metadata(args.retrieval_mode)
+    rag_graph = create_rag_graph(
+        build_retriever(args.retrieval_mode), prompt_version.text
+    )
     judge_model = os.getenv(
         "COATING_COMPASS_GENERATOR_JUDGE_MODEL", "gpt-5-mini-2025-08-07"
     )
@@ -163,6 +175,8 @@ def main() -> None:
             and saved_prompt_version != prompt_version.version
         ):
             raise ValueError("Cannot resume: Langfuse prompt version has changed.")
+        if output["run"].get("collection") != retrieval_config["collection"]:
+            raise ValueError("Cannot resume: retrieval mode has changed.")
         print(f"Resuming {len(output['cases'])}/20 cases from {output_path}")
     else:
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -175,8 +189,7 @@ def main() -> None:
                 "prompt_name": prompt_version.name,
                 "prompt_label": prompt_version.label,
                 "prompt_version": prompt_version.version,
-                "collection": COLLECTION_NAME,
-                "retrieval_k": RETRIEVAL_K,
+                **retrieval_config,
                 "generator_model": generator_model,
                 "evaluation_model": judge_model,
                 "goldens_sha256": goldens_hash,

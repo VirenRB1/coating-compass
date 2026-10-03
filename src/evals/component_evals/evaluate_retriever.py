@@ -16,7 +16,12 @@ from deepeval.metrics import (
 from deepeval.test_case import LLMTestCase
 from dotenv import load_dotenv
 
-from src.app.basic_rag import COLLECTION_NAME, RETRIEVAL_K, build_vector_store
+from src.app.basic_rag import (
+    RETRIEVAL_K,
+    RETRIEVAL_MODES,
+    build_retriever,
+    retrieval_metadata,
+)
 
 
 GOLDENS_PATH = Path("data/evaluations/manual_golden_dataset.json")
@@ -32,6 +37,9 @@ METRIC_NAMES = [
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate the baseline retriever.")
     parser.add_argument("--label", default="baseline")
+    parser.add_argument(
+        "--retrieval-mode", choices=RETRIEVAL_MODES, default="auto"
+    )
     parser.add_argument(
         "--case-id",
         action="append",
@@ -139,11 +147,12 @@ def main() -> None:
     load_dotenv()
     goldens = json.loads(GOLDENS_PATH.read_text(encoding="utf-8"))
     indexed_goldens = select_goldens(goldens, args.case_id)
-    vector_store = build_vector_store()
+    retriever = build_retriever(args.retrieval_mode)
+    retrieval_config = retrieval_metadata(args.retrieval_mode)
 
     test_cases = []
     for index, golden in indexed_goldens:
-        documents = vector_store.similarity_search(golden["question"], k=RETRIEVAL_K)
+        documents = retriever.invoke(golden["question"])
         retrieval_context = [
             f"Source: {document.metadata['source_filename']}, "
             f"page {document.metadata['page_number']}\n{document.page_content}"
@@ -173,10 +182,13 @@ def main() -> None:
             "label": args.label,
             "timestamp_utc": timestamp,
             "status": "running",
-            "collection": COLLECTION_NAME,
-            "retrieval_k": RETRIEVAL_K,
-            "embedding_model": os.getenv(
-                "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
+            **retrieval_config,
+            "embedding_model": (
+                None
+                if retrieval_config["retrieval_mode"] == "contextual-bm25"
+                else os.getenv(
+                    "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
+                )
             ),
             "evaluation_model": model,
             "goldens_sha256": hashlib.sha256(GOLDENS_PATH.read_bytes()).hexdigest(),

@@ -1,5 +1,63 @@
 # Learning log
 
+## 2026-09-27 — Contextual BM25 retrieval
+
+### In my own words
+
+BM25 is a lexical ranking method: it rewards query terms that appear in a chunk,
+especially terms that are rare across the corpus, while limiting the advantage of
+repeated terms and long chunks. Contextual BM25 indexes the synthetic explanation
+and original chunk together, which helps exact identifiers such as a product SKU or
+coating name find an otherwise ambiguous manufacturer passage.
+
+### Evidence and trade-off
+
+The completed contextual artifact already contains 921 validated generated contexts
+paired with immutable chunks. Reusing those pairs requires no model calls or new
+storage format. A small standard-library implementation keeps the scoring formula
+visible, remains independent of LangChain and other frameworks, and avoids a
+dependency for this corpus size. It does not add stemming,
+synonyms, typo tolerance, or semantic matching; those are reasons to compare and
+eventually fuse it with contextual dense retrieval, not to hide them in this slice.
+
+### Evidence boundary and failure modes
+
+Generated context participates only in ranking. Results expose the original chunk
+and source metadata. Queries with no indexed terms return an empty list rather than
+arbitrary zero-score evidence. Product punctuation is split into searchable tokens,
+so `22010/01` becomes `22010` and `01`; phrase and field-aware matching are not yet
+implemented. Equal BM25 scores are ordered by stable chunk ID rather than ingestion
+order, so unchanged inputs produce reproducible rankings.
+
+### Commands I can run
+
+```powershell
+$env:UV_CACHE_DIR = (Resolve-Path '.uv-cache')
+uv run python -m pytest tests/test_contextual_bm25.py
+```
+
+### Exercise / teach-back
+
+Explain why BM25 can find an exact SKU better than embeddings, but cannot understand
+an unseen synonym by itself.
+
+### Explicit experiment selection
+
+Application and evaluation entry points now accept the same four retrieval modes.
+`auto` preserves the old activation gate, while explicit modes prevent artifact
+availability from silently changing the architecture under test. Evaluation output
+records both the resolved mode and its collection/index identity so two retrieval
+architectures cannot be confused under one resumable run.
+BM25 reports its ranking constants and result count but uses a null Qdrant collection
+field, making it explicit that no vector collection backs that run.
+
+### Simplicity pass
+
+The BM25 module now uses plain objects instead of generics and has no wrapper factory.
+The application has one retriever-building boundary: local BM25 and LangChain's
+Qdrant retriever both expose `invoke(question)`. LangGraph therefore needs only two
+nodes—retrieve and generate—with no framework adapter or additional state model.
+
 ## 2026-09-27 — Generator provider identity in evaluations
 
 The answer generator and evaluation judge are separate experimental variables. A

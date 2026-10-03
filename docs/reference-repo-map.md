@@ -21,3 +21,12 @@ were used as learning references; source code, prompts, datasets, and artifacts 
 not copied. The adapted layout keeps application evaluation under `src/evals/` and
 reports under `reports/`, while retaining Coating Compass's existing models, corpus,
 and metadata.
+
+## Contextual BM25 retrieval
+
+This increment follows Anthropic's published Contextual Retrieval architecture, not
+a reference-repository source-code commit. It creates a lexical index from the same
+generated context plus original chunk used by contextual dense retrieval, while
+preserving original manufacturer text as the returned evidence. The implementation
+is original, standard-library BM25; hybrid fusion and reranking are postponed until
+the standalone retriever is evaluated.

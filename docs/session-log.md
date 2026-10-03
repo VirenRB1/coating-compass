@@ -2,6 +2,32 @@
 
 ## 2026-09-27
 
+- Added a dependency-free contextual BM25 retriever over the existing validated
+  generated-context-plus-original-text records. It returns only original
+  manufacturer chunks, makes no hosted calls, writes no index files, and is not yet
+  activated in the application so it can be evaluated as one experimental variable.
+- Kept the BM25 module itself entirely within Python's standard library by treating
+  application documents as generic payloads.
+- Made equal-score ranking deterministic by retaining and sorting on stable chunk ID
+  instead of relying on corpus insertion order.
+- Added explicit regression coverage that BM25 results preserve the stable chunk ID,
+  source hash, filename, page number, and citation URL metadata unchanged.
+- Added shared explicit retrieval selection to the interactive application and all
+  evaluation entry points: `auto`, `baseline-dense`, `contextual-dense`, and
+  `contextual-bm25`. `auto` retains the prior activation behavior, while evaluation
+  artifacts record the resolved architecture and reject incompatible resumes.
+- Corrected evaluation metadata so contextual BM25 records retrieval K and its
+  `k1=1.5`, `b=0.75` settings but a null Qdrant collection; dense modes retain their
+  real collection names.
+- Simplified the increment for teaching: removed BM25 generics and its pass-through
+  factory, eliminated repeated mode resolution in evaluators, and documented the
+  shared `invoke(question)` interface used by local BM25 and LangChain Qdrant.
+- Added focused tests for context-only discovery, original-text discovery, unmatched
+  queries, record-shape integration, tokenization, and invalid configuration.
+- Direct `uv run pytest` could not import `src`; verification uses
+  `uv run python -m pytest`. Ruff is not installed in the current environment and no
+  dependency was added solely for linting.
+
 - Added an explicit OpenAI answer-generator option after the full contextual run hit
   Groq's 200,000-token daily limit. Provider and model are now recorded and protected
   on resume, preventing the nine completed GPT-OSS cases from being mixed silently

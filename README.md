@@ -174,3 +174,52 @@ The command validates the complete contextual artifact before changing Qdrant. I
 embeds only missing stable chunk IDs, so rerunning it reuses all completed points.
 The local vector-store files under `data/vector_store/` are generated artifacts and
 must not be committed.
+
+## Contextual BM25 retrieval
+
+The dependency-free BM25 retriever follows Anthropic's Contextual BM25 pattern: it
+indexes each generated chunk context followed by the original manufacturer chunk.
+Search results still contain only the unchanged manufacturer text and its citation
+metadata, so synthetic context cannot become answer evidence.
+
+Build the in-memory lexical index from the complete, validated contextual artifact:
+
+```python
+from src.app.basic_rag import build_contextual_bm25_retriever
+
+retriever = build_contextual_bm25_retriever()
+documents = retriever.invoke("waterborne alkyd 22010 trim")
+```
+
+The index makes no network calls and writes no files. It returns only positive-score
+matches; an out-of-corpus query can therefore return no evidence instead of filling
+the result set with zero-score chunks. The active application remains on contextual
+dense retrieval until BM25 and a later hybrid rank-fusion experiment are evaluated
+against the same reviewed cases.
+
+Select a retrieval architecture explicitly in the application or any evaluation
+command with `--retrieval-mode`. Supported values are `auto`, `baseline-dense`,
+`contextual-dense`, and `contextual-bm25`:
+
+```powershell
+uv run python main.py --retrieval-mode contextual-bm25
+uv run python -m src.evals.component_evals.evaluate_retriever `
+  --retrieval-mode contextual-bm25 `
+  --label contextual-bm25
+```
+
+`auto` preserves the previous behavior: contextual dense is selected when the
+contextual artifact declares completion; otherwise baseline dense is selected.
+Explicit contextual modes validate the contextual artifact and fail instead of
+silently falling back. Evaluation artifacts record the resolved mode and retrieval
+identity; BM25 runs record no embedding model.
+BM25 evaluation metadata also records `retrieval_k`, `bm25_k1`, and `bm25_b`, while
+its Qdrant `collection` is `null` because the index is built in memory from the
+validated local contextual artifact.
+
+IMPORTANT INFORMATION
+
+>> Prefer simple, maintained LangChain and LangGraph components over handwritten framework or retrieval infrastructure when they satisfy the project’s
+>> safety and evidence requirements. Keep custom code only for coating-specific validation, evidence boundaries, deterministic safety rules, or behavior
+>> unavailable from the framework. Optimize for the least code the owner can clearly explain.
+>>

@@ -1,3 +1,4 @@
+import argparse
 import hashlib
 import json
 import os
@@ -18,6 +19,11 @@ from langgraph.graph import END, START, StateGraph
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
+from src.app.contextual_bm25 import (
+    DEFAULT_B as BM25_B,
+    DEFAULT_K1 as BM25_K1,
+    ContextualBM25Retriever,
+)
 from src.app.prompt_registry import fetch_baseline_prompt
 from src.data.contextualize_documents import (
     MANIFEST_PATH as CONTEXTUAL_MANIFEST_PATH,
@@ -36,6 +42,17 @@ from src.data.corpus import (
 VECTOR_STORE_DIRECTORY = Path("data/vector_store/qdrant")
 BASELINE_COLLECTION_NAME = "coating-compass-baseline-v1"
 CONTEXTUAL_COLLECTION_NAME = "coating-compass-contextual-dense-v1"
+CONTEXTUAL_BM25_NAME = "coating-compass-contextual-bm25-v1"
+RETRIEVAL_MODES = (
+    "auto",
+    "baseline-dense",
+    "contextual-dense",
+    "contextual-bm25",
+)
+DENSE_COLLECTIONS = {
+    "baseline-dense": BASELINE_COLLECTION_NAME,
+    "contextual-dense": CONTEXTUAL_COLLECTION_NAME,
+}
 
 
 def contextual_artifact_declares_complete() -> bool:
@@ -231,6 +248,16 @@ def load_complete_contextual_documents() -> list[tuple[str, Document, str]]:
     return contextual_documents
 
 
+def build_contextual_bm25_retriever() -> ContextualBM25Retriever:
+    """Build a local lexical index from the complete contextual artifact."""
+
+    # The loader returns (stable ID, original Document, context + original text).
+    # BM25 indexes the last item but returns the original Document as evidence.
+    return ContextualBM25Retriever(
+        load_complete_contextual_documents(), k=RETRIEVAL_K
+    )
+
+
 def create_qdrant_store(
     client: QdrantClient, collection_name: str, embeddings: OpenAIEmbeddingAdapter
 ) -> QdrantVectorStore:
@@ -322,23 +349,72 @@ def build_contextual_vector_store(
     return vector_store
 
 
-def build_vector_store() -> QdrantVectorStore:
+def resolve_retrieval_mode(retrieval_mode: str) -> str:
+    if retrieval_mode not in RETRIEVAL_MODES:
+        raise ValueError(
+            f"retrieval mode must be one of: {', '.join(RETRIEVAL_MODES)}."
+        )
+    if retrieval_mode == "auto":
+        return (
+            "contextual-dense"
+            if contextual_artifact_declares_complete()
+            else "baseline-dense"
+        )
+    return retrieval_mode
+
+
+def retrieval_name(retrieval_mode: str) -> str:
+    resolved = resolve_retrieval_mode(retrieval_mode)
+    if resolved == "contextual-bm25":
+        return CONTEXTUAL_BM25_NAME
+    return DENSE_COLLECTIONS[resolved]
+
+
+def retrieval_metadata(retrieval_mode: str) -> dict:
+    resolved = resolve_retrieval_mode(retrieval_mode)
+    is_bm25 = resolved == "contextual-bm25"
+    return {
+        "retrieval_mode": resolved,
+        "retrieval_k": RETRIEVAL_K,
+        # BM25 is rebuilt in memory; only dense modes have Qdrant collections.
+        "collection": None if is_bm25 else DENSE_COLLECTIONS[resolved],
+        "bm25_k1": BM25_K1 if is_bm25 else None,
+        "bm25_b": BM25_B if is_bm25 else None,
+    }
+
+
+def build_vector_store(retrieval_mode: str = "auto") -> QdrantVectorStore:
+    resolved = resolve_retrieval_mode(retrieval_mode)
+    if resolved == "contextual-bm25":
+        raise ValueError("contextual-bm25 does not use a vector store.")
     embedding_model = os.getenv(
         "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
     )
     embeddings = OpenAIEmbeddingAdapter(model=embedding_model)
     VECTOR_STORE_DIRECTORY.mkdir(parents=True, exist_ok=True)
     client = QdrantClient(path=str(VECTOR_STORE_DIRECTORY))
-    if contextual_artifact_declares_complete():
+    if resolved == "contextual-dense":
         return build_contextual_vector_store(client, embeddings)
     return build_baseline_vector_store(client, embeddings, embedding_model)
 
 
-def create_rag_graph(vector_store: QdrantVectorStore, system_prompt: str):
-    retriever = vector_store.as_retriever(
+def build_retriever(retrieval_mode: str = "auto"):
+    """Return one object with the simple ``invoke(question)`` interface."""
+
+    resolved = resolve_retrieval_mode(retrieval_mode)
+    if resolved == "contextual-bm25":
+        return build_contextual_bm25_retriever()
+
+    # LangChain already provides the same invoke interface for Qdrant.
+    return build_vector_store(resolved).as_retriever(
         search_type="similarity",
         search_kwargs={"k": RETRIEVAL_K},
     )
+
+
+def create_rag_graph(retriever, system_prompt: str):
+    """Create the smallest useful graph: retrieve evidence, then answer."""
+
     model = create_generator_model()
     prompt = ChatPromptTemplate.from_messages(
         [
@@ -355,6 +431,7 @@ def create_rag_graph(vector_store: QdrantVectorStore, system_prompt: str):
     )
 
     def retrieve(state: RAGState) -> dict:
+        # Both local BM25 and LangChain's dense retriever support invoke().
         documents = retriever.invoke(state["question"])
         return {"documents": documents}
 
@@ -374,6 +451,7 @@ def create_rag_graph(vector_store: QdrantVectorStore, system_prompt: str):
         response = model.invoke(messages)
         return {"answer": response.content}
 
+    # The explicit two-node graph keeps retrieval and generation easy to test.
     graph = StateGraph(RAGState)
     graph.add_node("retrieve", retrieve)
     graph.add_node("generate", generate)
@@ -384,16 +462,27 @@ def create_rag_graph(vector_store: QdrantVectorStore, system_prompt: str):
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the Coating Compass RAG app.")
+    parser.add_argument(
+        "--retrieval-mode",
+        choices=RETRIEVAL_MODES,
+        default="auto",
+        help="Retrieval architecture (default: auto).",
+    )
+    args = parser.parse_args()
     truststore.inject_into_ssl()
     load_dotenv()
-    vector_store = build_vector_store()
+    retriever = build_retriever(args.retrieval_mode)
     if os.getenv("COATING_COMPASS_INGEST_ONLY") == "1":
         print("Ingest-only run complete.")
         return
     prompt_version = fetch_baseline_prompt()
-    rag_graph = create_rag_graph(vector_store, prompt_version.text)
+    rag_graph = create_rag_graph(retriever, prompt_version.text)
 
-    print("Coating Compass basic RAG is ready. Type 'quit' to exit.")
+    print(
+        f"Coating Compass RAG is ready with {retrieval_name(args.retrieval_mode)}. "
+        "Type 'quit' to exit."
+    )
     while True:
         question = input("\nProject question: ").strip()
         if question.lower() in {"quit", "exit"}:

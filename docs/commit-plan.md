@@ -14,6 +14,23 @@
 - Suggested commit: `feat: add guarded contextual dense retrieval pipeline`
 - Deferred: BM25, rank fusion, reranking, and comparative dashboards.
 
+## Milestone: contextual BM25 retrieval
+
+- Status: implemented locally; comparative evaluation pending.
+- Scope: dependency-free tokenization and BM25 scoring over each validated generated
+  context plus original manufacturer chunk.
+- Evidence boundary: ranked results return the original chunk and citation metadata,
+  never the synthetic context as manufacturer evidence.
+- Acceptance criteria: deterministic ranking, retrieval through context or original
+  text, empty results for unmatched terms, validation of parameters, and no hosted
+  calls or generated index files.
+- Suggested commit: `feat: add dependency-free contextual BM25 retrieval`
+- Deferred: activating BM25 in the RAG application, reciprocal-rank fusion,
+  reranking, stemming, and comparative hosted evaluation.
+- Follow-up: added explicit `auto`, `baseline-dense`, `contextual-dense`, and
+  `contextual-bm25` selection to application and evaluation entry points. No mode is
+  promoted as the new default; `auto` preserves existing behavior.
+
 ## Milestone: Full-pipeline DeepEval baseline
 
 - Status: implemented, executed, and organized for review.

@@ -23,11 +23,13 @@ from deepeval.test_case import LLMTestCase
 from dotenv import load_dotenv
 
 from src.app.basic_rag import (
-    COLLECTION_NAME,
     RETRIEVAL_K,
-    build_vector_store,
+    RETRIEVAL_MODES,
+    build_retriever,
     create_rag_graph,
     generator_model_config,
+    retrieval_metadata,
+    retrieval_name,
 )
 from src.app.prompt_registry import fetch_baseline_prompt
 from src.evals.application_evals.metrics import build_full_pipeline_metrics
@@ -54,7 +56,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--label",
-        help="Run label override (default: the active Qdrant collection name).",
+        help="Run label override (default: the resolved retrieval name).",
+    )
+    parser.add_argument(
+        "--retrieval-mode", choices=RETRIEVAL_MODES, default="auto"
     )
     parser.add_argument(
         "--case-id",
@@ -151,12 +156,35 @@ def validate_resume_generator(
         )
 
 
+def validate_resume_retrieval(
+    output: dict[str, Any], *, retrieval_config: dict[str, Any]
+) -> None:
+    run = output.get("run", {})
+    if run.get("collection") != retrieval_config["collection"]:
+        raise ValueError("Cannot resume: retrieval architecture has changed.")
+    saved_mode = run.get("retrieval_mode")
+    if saved_mode is not None and saved_mode != retrieval_config["retrieval_mode"]:
+        raise ValueError("Cannot resume: retrieval mode has changed.")
+    for setting in ("retrieval_k", "bm25_k1", "bm25_b"):
+        if run.get(setting) != retrieval_config[setting]:
+            raise ValueError(f"Cannot resume: {setting} has changed.")
+
+
 def render_retrieval_context(documents: list) -> list[str]:
     return [
         f"Source: {document.metadata['source_filename']}, "
         f"page {document.metadata['page_number']}\n{document.page_content}"
         for document in documents
     ]
+
+
+def close_retriever(retriever) -> None:
+    """Close a dense retriever's local Qdrant client; BM25 owns no resources."""
+
+    vector_store = getattr(retriever, "vectorstore", None)
+    client = getattr(vector_store, "client", None)
+    if client is not None:
+        client.close()
 
 
 def serialize_metric(metric_result) -> dict[str, Any]:
@@ -265,7 +293,9 @@ def main() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
     args = parse_args()
-    label = args.label or COLLECTION_NAME
+    retrieval_id = retrieval_name(args.retrieval_mode)
+    retrieval_config = retrieval_metadata(args.retrieval_mode)
+    label = args.label or retrieval_id
     if args.limit is not None and args.limit < 1:
         raise ValueError("--limit must be at least 1.")
     if args.workers < 1:
@@ -302,6 +332,9 @@ def main() -> None:
         validate_resume_generator(
             output, provider=generator_provider, model=generator_model
         )
+        validate_resume_retrieval(
+            output, retrieval_config=retrieval_config
+        )
 
     os.environ["DEEPEVAL_PER_ATTEMPT_TIMEOUT_SECONDS_OVERRIDE"] = str(
         args.metric_timeout_seconds
@@ -314,9 +347,11 @@ def main() -> None:
     embedding_model = os.getenv(
         "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
     )
+    if retrieval_config["retrieval_mode"] == "contextual-bm25":
+        embedding_model = None
     prompt_version = fetch_baseline_prompt()
-    vector_store = build_vector_store()
-    rag_graph = create_rag_graph(vector_store, prompt_version.text)
+    retriever = build_retriever(args.retrieval_mode)
+    rag_graph = create_rag_graph(retriever, prompt_version.text)
 
     if args.resume:
         saved_prompt_version = output["run"].get("prompt_version")
@@ -345,8 +380,7 @@ def main() -> None:
                 "prompt_name": prompt_version.name,
                 "prompt_label": prompt_version.label,
                 "prompt_version": prompt_version.version,
-                "collection": COLLECTION_NAME,
-                "retrieval_k": RETRIEVAL_K,
+                **retrieval_config,
                 "embedding_model": embedding_model,
                 "generator_provider": generator_provider,
                 "generator_model": generator_model,
@@ -421,7 +455,7 @@ def main() -> None:
     if failures:
         output["run"]["status"] = "incomplete"
         write_json_report(json_path, output)
-        vector_store.client.close()
+        close_retriever(retriever)
         raise RuntimeError(
             f"{len(failures)} case(s) failed; completed cases remain saved at {json_path}"
         )
@@ -429,7 +463,7 @@ def main() -> None:
     output["run"]["status"] = "complete"
     write_json_report(json_path, output)
     write_markdown_report(markdown_path, output)
-    vector_store.client.close()
+    close_retriever(retriever)
     print(f"Saved JSON report to {json_path}")
     print(f"Saved Markdown report to {markdown_path}")
 

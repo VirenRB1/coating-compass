@@ -64,14 +64,14 @@ class FullPipelineInputTests(unittest.TestCase):
                     "src.evals.application_evals.evaluate_full_pipeline.fetch_baseline_prompt"
                 ) as fetch_prompt,
                 patch(
-                    "src.evals.application_evals.evaluate_full_pipeline.build_vector_store"
-                ) as build_store,
+                    "src.evals.application_evals.evaluate_full_pipeline.build_retriever"
+                ) as build_retriever,
                 self.assertRaises(ValueError),
             ):
                 main()
 
         fetch_prompt.assert_not_called()
-        build_store.assert_not_called()
+        build_retriever.assert_not_called()
 
     def test_changed_input_prevents_resume(self) -> None:
         saved = {"run": {"goldens_sha256": "original", "label": "collection-v1"}}
