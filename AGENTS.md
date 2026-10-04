@@ -19,7 +19,8 @@ Current commands:
 
 - Install: `uv sync`
 - Validate sources/contextual inventory (offline): `uv run python -m src.data.contextualize_documents --dry-run`
-- Ingest baseline (hosted embedding calls; approval required): set `COATING_COMPASS_INGEST_ONLY=1`, then `uv run python main.py --retrieval-mode baseline-dense`
+- Validate configuration (offline): `uv run python -m src.config`
+- Ingest baseline (hosted embedding calls; approval required): set `retrieval.mode: baseline-dense` in `params.yaml`, then `uv run python main.py --ingest-only`
 - Automated test files were removed at the owner's request; do not recreate or run tests unless requested.
 - Lint: `uv tool run ruff check .` (use `uv --system-certs` on this Windows network)
 
@@ -121,6 +122,13 @@ Change one major experimental variable at a time.
 
 Validate configuration and data schemas early.
 
+Use `params.yaml` as the sole source of project-owned run settings, validated through
+`src/config.py` before clients or output artifacts. Credentials and connection endpoints
+remain in `.env`; do not restore model/tuning overrides through environment or CLI.
+Preserve normalized parameter snapshots and hashes in evaluation reports. Changing
+index model/chunking identity requires a new collection. Do not fabricate snapshots
+for historical runs or resume runs with changed configuration.
+
 Keep deterministic tests separate from paid or networked evaluations.
 
 Never commit secrets, raw private data, local vector databases, tool caches, or transient run artifacts.
@@ -135,4 +143,7 @@ Use specific, educational commit messages and include tests with behavior change
 
 Current priority
 
-The basic RAG implementation is complete. The immediate target is to adapt reference commit f0a6d33 by defining a coating-specific evaluation-case schema and creating ten carefully reviewed coating scenarios before generating synthetic cases. First compare the current baseline with reference commit bbd76d5 and identify only the foundation gaps that affect this milestone.
+The basic RAG and controlled dense A/B evaluations are complete. The current owner-approved
+increment centralizes validated YAML configuration and preserves experiment snapshots for
+later MLflow integration. MLflow server/logging setup and BM25/hybrid paid evaluations remain
+separate follow-up work requiring owner approval. Keep docs local and do not recreate tests.

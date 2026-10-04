@@ -1,257 +1,158 @@
 # Coating Compass
 
-Coating Compass is an evidence-based coating recommendation assistant that
-translates plain-language project descriptions into technical requirements and
-retrieves supporting guidance from manufacturer Technical Data Sheets (TDS) and
-Safety Data Sheets (SDS).
-
-This is an unofficial learning and portfolio project. It is not affiliated with,
-endorsed by, or presented as an official application of Dulux, PPG, or any other
-manufacturer. Recommendations are decision support and should be verified
-against the cited manufacturer documentation.
+Coating Compass translates painting projects into technical requirements and retrieves
+supporting manufacturer TDS/SDS evidence. This is an unofficial learning project,
+unaffiliated with Dulux or PPG. Recommendations must be checked against the cited documents.
 
 ## Repository layout
 
-- `src/app/`: baseline RAG ingestion, retrieval, and answer generation.
-- `src/data/`: golden-dataset generation utilities.
-- `src/evals/component_evals/`: retriever-only and generator-only evaluations.
-- `src/evals/application_evals/`: full-pipeline DeepEval suite and reporting.
-- `data/`: local source corpus, tracked evaluation inputs, and ignored generated stores.
-- `reports/`: reviewable evaluation reports; machine-readable run JSON is ignored.
-- `docs/`: project context, learning notes, evaluation plan, and session handoff.
+- `params.yaml`: pipeline settings and experiment controls.
+- `src/config.py`: Pydantic validation, normalized snapshots, and configuration hashes.
+- `src/app/`: ingestion, retrieval, original-only evidence, and LangGraph application.
+- `src/data/`: source extraction, contextualization, and golden generation.
+- `src/evals/`: component evaluation, concurrent full-pipeline comparisons, and reporting.
+- `data/`: source corpus, reviewed evaluation inputs, and ignored generated stores.
+- `reports/`: reviewable Markdown results and ignored machine-readable JSON.
+- `docs/`: local project, learning, and session notes; excluded from Git.
 
-The structure adapts lessons from the reference LLMOps repository without copying its
-source, prompts, datasets, or generated artifacts.
+Reference-repository lessons are adapted without copying its source, prompts, or datasets.
 
-## Setup
+## Setup and configuration
 
 ```powershell
 uv sync
+uv run python -m src.config
 ```
 
-Copy `.env.example` to `.env` and supply the hosted-provider credentials you intend
-to use. Do not commit `.env`.
+Copy `.env.example` to `.env` for provider credentials and Langfuse connection settings.
+Model choices, paths, chunking, retrieval, retries, parallelism, thresholds, prompt
+name/label, and case selection come only from `params.yaml`. Old `COATING_COMPASS_*`
+environment overrides are no longer read. Never place credentials in YAML.
 
-## Run the baseline
+Every entry point accepts `--params path/to/experiment.yaml`; the default is the
+repository's `params.yaml`. Relative YAML paths resolve against the repository root.
+All fields are required. Unknown fields, invalid types, nonfinite numbers, invalid
+ranges, and inconsistent bounds fail before clients or output artifacts are created.
+Pydantic permits ordinary coercion, such as `"5"` to integer `5`. Chunk separators
+retain their whitespace exactly. Edit YAML before starting a new process.
+
+For a one-question smoke evaluation, set `evaluation.case_ids: [manual_002]` and
+`evaluation.limit: null`. Restore `case_ids: []` for all cases. Alternatively use
+`limit` for the first N cases. Golden generation has its own `golden_generation.case_ids`.
+
+Defaults preserve 1000/150 character chunks, hosted `text-embedding-3-small` embeddings
+(1536 dimensions), Groq `openai/gpt-oss-20b` generation, GPT-5 mini judging, K=5,
+and existing collection names. Groq is the provider; Grok is a different model family.
+Prompt text, judge rubrics, and safety rules remain in their existing registry/code.
+
+Changing embedding model, dimensions, distance, or chunking requires new collection
+names. Qdrant metadata prevents incompatible index reuse; legacy baseline/contextual
+v1 indexes are accepted only with their original configuration. Contextual artifact
+versions, hashes, completeness, and original-text records are checked before indexing.
+
+## Application and source inventory
+
+These commands validate local inputs without API calls or writes:
 
 ```powershell
-uv run python main.py
-```
-
-The baseline uses hosted embeddings and generation. It may incur API usage.
-
-## Evaluation commands
-
-Validate golden-generation inputs without calling a model:
-
-```powershell
+uv run python -m src.data.contextualize_documents --dry-run
 uv run python -m src.data.generate_manual_goldens
 ```
 
-The component and full-pipeline commands call hosted retrieval, generation, and judge
-models and should only run with cost approval. The full-pipeline command validates
-the reviewed golden dataset before making those calls:
+The current corpus contains 36 documents and 921 chunks. Contextual records and their
+manifest live under `paths.contextual_artifacts`; partial/stale artifacts cannot be
+indexed. Adding `--generate` to golden generation acknowledges hosted costs.
+
+After approving hosted model costs:
+
+```powershell
+uv run python main.py
+uv run python main.py --ingest-only
+```
+
+Choose `retrieval.mode` in YAML: `auto`, `baseline-dense`, `contextual-dense`, or
+`contextual-bm25`. Auto selects contextual dense when the manifest declares completion,
+otherwise baseline dense. Explicit contextual modes fail on unusable artifacts.
+Dense ingestion embeds missing chunks and reuses compatible existing points.
+
+For a contextualization pilot, set `contextualization.document` to the PDF filename;
+use `null` for the full corpus. Choose `contextualization.provider` as `groq`,
+`openai`, or `auto`, then, with cost approval:
+
+```powershell
+uv run python -m src.data.contextualize_documents --confirm-paid-calls
+```
+
+Generation proceeds sequentially by PDF with append-only checkpoints. Auto routes
+Groq-oversized requests to OpenAI and switches after Groq daily quota exhaustion;
+OpenAI quota exhaustion stops the run. Provider records may coexist. Completion
+writes one current successful record per chunk to `chunks.jsonl`.
+`scripts/run_contextualization_after_delay.ps1` accepts operational `-StartAt` and
+`-Params` arguments and reads its provider/artifact directory from YAML.
+
+Inspect the configured Langfuse prompt with `uv run python -m src.app.prompt_registry`.
+Register a new version with explicit approval using
+`uv run python -m scripts.register_baseline_prompt`.
+
+## Evaluation and reproducibility
+
+These commands call hosted generator/judge models and require cost approval:
 
 ```powershell
 uv run python -m src.evals.component_evals.evaluate_retriever --label baseline
 uv run python -m src.evals.component_evals.evaluate_generator --label baseline
-uv run python -m src.evals.application_evals.evaluate_full_pipeline `
-  --goldens data/evaluations/manual_golden_dataset.json `
-  --workers 2 `
-  --metric-timeout-seconds 300
+uv run python -m src.evals.application_evals.evaluate_full_pipeline --label experiment
+uv run python -m src.evals.application_evals.evaluate_dense_comparison --label dense-comparison
 ```
 
-After the contextual collection is complete and indexed, run only the known
-`manual_002` retrieval miss before considering a full evaluation:
+`evaluation.comparison_modes` assigns baseline/contextual dense to A and B in order.
+Questions and each answer's seven metrics run concurrently. `comparison_workers`
+controls case workers; `generator_rpm` shares LangChain request pacing across both
+modes. Three requests/minute is not an exact token limiter. Logs identify [A]/[B]
+progress; hybrid retrieval remains a future experiment.
 
-```powershell
-uv run python -m src.evals.component_evals.evaluate_retriever `
-  --label contextual-dense-v1 `
-  --case-id manual_002
-```
+Full-pipeline/comparison reports go under `paths.reports`; component JSON goes under
+`paths.evaluation_results`. Cases preserve references, original manufacturer context,
+answers, scores, and judge reasons. Each new run stores `run.params` (normalized
+validated settings) and `run.params_sha256` (canonical SHA-256); Markdown displays
+the hash. These prepare later MLflow logging. No MLflow server/uploads are enabled yet.
 
-When `--label` is omitted, the full-pipeline run label is the active Qdrant collection
-name. `--label` remains available for an explicit experiment label. The command writes
-a combined, resumable JSON dataset and a human-readable Markdown report under
-`reports/full_pipeline_<label>_<timestamp>.json` and `.md`. Each JSON case retains the
-reviewed answer/context, retrieved manufacturer context, actual application answer,
-and all seven metric results and reasons. JSON artifacts are local run data; the
-reviewed Markdown report may be committed as experiment evidence.
-
-Resume an interrupted run with the same golden file and saved JSON artifact:
+Resume with identical YAML, dataset, and experiment label:
 
 ```powershell
 uv run python -m src.evals.application_evals.evaluate_full_pipeline `
-  --goldens data/evaluations/manual_golden_dataset.json `
-  --resume reports/full_pipeline_<label>_<timestamp>.json
+  --label experiment --resume reports/full_pipeline_experiment_<timestamp>.json
+uv run python -m src.evals.application_evals.evaluate_dense_comparison `
+  --label dense-comparison `
+  --resume-a reports/full_pipeline_dense-comparison-A_<timestamp>.json `
+  --resume-b reports/full_pipeline_dense-comparison-B_<timestamp>.json
 ```
 
-The saved input path and SHA-256 make the run auditable. Resume fails before hosted
-calls if the golden file contents changed or its run label no longer matches.
-Generator provider and model are also resume-protected so one report cannot silently
-combine answers from different systems. To evaluate with GPT-5 mini as both the
-application generator and judge, set these session variables and start a new run:
-
-```powershell
-$env:COATING_COMPASS_GENERATOR_PROVIDER = "openai"
-$env:COATING_COMPASS_GENERATOR_MODEL = "gpt-5-mini-2025-08-07"
-uv run python -m src.evals.application_evals.evaluate_full_pipeline `
-  --goldens data/evaluations/manual_golden_dataset.json `
-  --workers 1 `
-  --metric-timeout-seconds 300
-```
-
-## Contextual dense retrieval
-
-The contextual pipeline creates a synthetic, chunk-specific retrieval prefix from
-each complete PDF. The prefix is embedded with the original chunk, but only the
-unchanged manufacturer chunk is returned to the answer model as evidence.
-
-Validate source hashes and reproduce the expected corpus inventory without network
-or API calls:
-
-```powershell
-uv run python -m src.data.contextualize_documents --dry-run
-```
-
-The expected result is 36 documents and 921 chunks. Generated records and their
-manifest are checkpointed under the ignored `data/processed/contextual_dense_v1/`
-directory. A partial or stale artifact cannot be indexed.
-
-After explicit approval for paid Groq calls, run the X-PERT Waterborne Alkyd pilot:
-
-```powershell
-uv run python -m src.data.contextualize_documents `
-  --document 06_Dulux_XPERT_Waterborne_Alkyd_22010_01_TDS.pdf `
-  --confirm-paid-calls
-```
-
-Review every pilot record before omitting `--document` for the resumable full-corpus
-run. Application and evaluation ingestion remain on the baseline until all 921
-records are complete. They then activate `coating-compass-contextual-dense-v1` only
-after validating every record. Building the new collection calls the configured
-OpenAI embedding API; the existing baseline collection remains untouched.
-
-If Groq's daily free-tier quota stops a resumable corpus run, the remaining chunks
-can use `gpt-5-mini` through the existing OpenAI account:
-
-```powershell
-uv run python -m src.data.contextualize_documents `
-  --provider openai `
-  --confirm-paid-calls
-```
-
-Use `--provider auto` to start with Groq, route Groq-oversized documents through
-OpenAI, and switch the remaining run to OpenAI after Groq's daily quota is exhausted.
-OpenAI quota exhaustion still stops the checkpointed run.
-
-Groq and OpenAI records may coexist in the same manifest. Configure an OpenAI
-project-side budget or credit cap first: the local command stops on an explicit API
-quota rejection, but cannot determine whether an accepted request used promotional
-or paid account balance.
-
-OpenAI prompt caching is automatic for eligible repeated prefixes. Context generation
-groups chunks sequentially by PDF and places the stable instructions and complete
-document before the varying chunk. After all 921 chunks complete, the command writes
-`data/processed/contextual_dense_v1/chunks.jsonl` with exactly one latest successful
-record per chunk; append-only per-document records remain available for auditing.
-
-Build or resume the separate contextual Qdrant collection without starting the
-interactive application:
-
-```powershell
-$env:COATING_COMPASS_INGEST_ONLY = "1"
-uv run python main.py
-```
-
-The command validates the complete contextual artifact before changing Qdrant. It
-embeds only missing stable chunk IDs, so rerunning it reuses all completed points.
-The local vector-store files under `data/vector_store/` are generated artifacts and
-must not be committed.
-
-## Contextual BM25 retrieval
-
-LangChain's `BM25Retriever` (using `rank-bm25`) follows Anthropic's Contextual BM25 pattern: it
-indexes each generated chunk context followed by the original manufacturer chunk.
-Search results still contain only the unchanged manufacturer text and its citation
-metadata, so synthetic context cannot become answer evidence.
-
-Build the in-memory lexical index from the complete, validated contextual artifact:
-
-```python
-from src.app.basic_rag import build_contextual_bm25_retriever
-
-retriever = build_contextual_bm25_retriever()
-documents = retriever.invoke("waterborne alkyd 22010 trim")
-```
-
-The index makes no network calls and writes no files. A small LangChain Runnable
-boundary filters candidates without query-term overlap
-before limiting to the requested K and restores the original Documents with all
-source metadata. Unknown or punctuation-only queries return no evidence. This is
-an overlap guard, not a relevance or safety guarantee. BM25Okapi can assign zero
-or negative scores to matching chunks, so positive-score filtering is unsuitable.
-
-The active application remains on contextual dense retrieval until BM25 and a later hybrid rank-fusion experiment are evaluated
-against the same reviewed cases.
-
-Select a retrieval architecture explicitly in the application or any evaluation
-command with `--retrieval-mode`. Supported values are `auto`, `baseline-dense`,
-`contextual-dense`, and `contextual-bm25`:
-
-```powershell
-uv run python main.py --retrieval-mode contextual-bm25
-uv run python -m src.evals.component_evals.evaluate_retriever `
-  --retrieval-mode contextual-bm25 `
-  --label contextual-bm25
-```
-
-`auto` preserves the previous behavior: contextual dense is selected when the
-contextual artifact declares completion; otherwise baseline dense is selected.
-Explicit contextual modes validate the contextual artifact and fail instead of
-silently falling back. Evaluation artifacts record the resolved mode and retrieval
-identity; BM25 runs record no embedding model.
-BM25 evaluation metadata also records `retrieval_k`, `bm25_k1`, and `bm25_b`, while
-its Qdrant `collection` is `null` because the index is built in memory from the
-validated local contextual artifact.
+Resume rejects changed settings, dataset hashes, retrieval/generator identities, or
+prompt versions. Historical reports without snapshots remain readable but cannot
+be resumed; start a new run instead of inventing configuration for old evidence.
+Comparison checkpoints preserve answers and completed metrics. The generator
+component automatically resumes matching partial runs.
 
 ## Framework-first engineering
 
-Prefer maintained LangChain and LangGraph components over handwritten infrastructure
-when they satisfy the project's safety and evidence requirements. Keep custom code
-for coating-specific validation, original-only evidence boundaries, deterministic
-safety rules, and behavior unavailable from the frameworks. Choose the least code
-the owner can clearly explain.
+Prefer maintained LangChain/LangGraph components wherever they satisfy safety and
+evidence requirements. Keep explicit coating-specific validation, original-only
+evidence boundaries, deterministic safety rules, and unsupported framework behavior.
 
-BM25 ranking uses LangChain; embeddings use `OpenAIEmbeddings` with automatic token
-splitting disabled to preserve the prior embedding input. App and evaluation paths
-share original-only citation rendering. Hash validation, contextual artifact
-checkpoints, original-text Qdrant payloads, evaluation identity checks, and domain
-rules remain explicit. See [the simplification decision](docs/decisions/0002-framework-first-simplification.md)
-for the repository-wide review and trade-offs.
+Contextual dense embeddings and LangChain's `BM25Retriever` index synthetic context
+plus original text; answer generation and judges receive only unchanged manufacturer
+chunks and citations. BM25 is rebuilt in memory without network calls or index files.
+Its Runnable boundary filters results without query-term overlap and restores
+original Documents. Unknown/punctuation-only queries return no evidence; this guard
+is not a relevance or safety guarantee. Matching BM25Okapi scores may be zero/negative.
 
-BM25 now has retrieval identity `coating-compass-contextual-bm25-v2` and evaluation
-metadata `bm25_implementation=langchain-bm25okapi-v2`. Its scoring differs from the
-handwritten v1 implementation; start a new BM25 evaluation rather than resuming v1.
-No retrieval quality improvement is claimed until the reviewed cases are rerun with
-cost approval. Dense collections and immutable source documents are unchanged.
+BM25 identity is `coating-compass-contextual-bm25-v2`, with
+`bm25_implementation=langchain-bm25okapi-v2`. Do not resume handwritten v1 runs.
+BM25 records no embedding model or Qdrant collection. Hosted embeddings use LangChain
+with automatic token splitting disabled to preserve input text. Immutable PDFs,
+generated embeddings, vector stores, and secrets must never be committed publicly.
 
-## Concurrent dense evaluation
-
-After approving hosted-model costs, compare baseline dense (A) and contextual
-dense (B) with one shared local Qdrant client:
-
-```powershell
-uv run python -m src.evals.application_evals.evaluate_dense_comparison --case-id manual_002 --label dense-smoke --workers 2
-uv run python -m src.evals.application_evals.evaluate_dense_comparison --label dense-full --workers 40
-```
-
-The configured generator produces answers; `COATING_COMPASS_EVALUATION_MODEL`
-selects the judge. This experiment uses Groq `openai/gpt-oss-20b` generation and
-GPT-5 mini judging. Questions run concurrently and each answer's seven DeepEval
-metrics run concurrently. Shared LangChain generator pacing defaults to three
-requests/minute; it is not an exact token limiter. Logs identify `[A]` and `[B]`
-progress. JSON checkpoints retain generated answers and each completed metric;
-`--resume-a` and `--resume-b` resume partial work without repeating successful
-judgments. See [the evaluation plan](docs/evaluation-plan.md) for model controls,
-reproduction, limitations, and live terminal monitoring.
+Automated test files were removed at the owner's request. Use offline validation
+above and `uv --system-certs tool run ruff check .` for lint. Keep updating the ignored
+local learning/configuration notes under `docs/`.

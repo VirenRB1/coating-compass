@@ -22,8 +22,6 @@ from deepeval.test_case import LLMTestCase
 from dotenv import load_dotenv
 
 from src.app.basic_rag import (
-    RETRIEVAL_K,
-    RETRIEVAL_MODES,
     build_retriever,
     create_rag_graph,
     generator_model_config,
@@ -32,6 +30,16 @@ from src.app.basic_rag import (
 )
 from src.app.evidence import render_retrieval_context
 from src.app.prompt_registry import fetch_baseline_prompt
+from src.config import (
+    add_params_argument,
+    config_snapshot,
+    get_params,
+    load_params,
+    metric_threshold,
+    select_cases,
+    validate_resume_config,
+)
+from src.config import path as config_path
 from src.evals.application_evals.metrics import build_full_pipeline_metrics
 from src.evals.application_evals.reporting import (
     calculate_averages,
@@ -39,55 +47,26 @@ from src.evals.application_evals.reporting import (
     write_markdown_report,
 )
 
-GOLDENS_PATH = Path("data/evaluations/manual_golden_dataset.json")
-REPORTS_DIRECTORY = Path("reports")
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Evaluate retrieval and generation across the full RAG pipeline."
     )
+    add_params_argument(parser)
     parser.add_argument(
-        "--goldens",
-        type=Path,
-        default=GOLDENS_PATH,
-        help=f"Reviewed golden dataset (default: {GOLDENS_PATH}).",
+        "--label", help="Run label (default: resolved retrieval identity)."
     )
     parser.add_argument(
-        "--label",
-        help="Run label override (default: the resolved retrieval name).",
+        "--resume", type=Path, help="Resume a report with identical validated settings."
     )
-    parser.add_argument(
-        "--retrieval-mode", choices=RETRIEVAL_MODES, default="auto"
-    )
-    parser.add_argument(
-        "--case-id",
-        action="append",
-        help="Evaluate only this manual_NNN case ID. Repeat to select more than one.",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        help="Evaluate only the first N cases for an explicitly approved smoke run.",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=4,
-        help="Number of cases to evaluate concurrently (default: 4).",
-    )
-    parser.add_argument(
-        "--metric-timeout-seconds",
-        type=int,
-        default=300,
-        help="DeepEval deadline for each individual metric call (default: 300).",
-    )
-    parser.add_argument(
-        "--resume",
-        type=Path,
-        help="Resume an incomplete JSON artifact without rerunning completed cases.",
-    )
-    return parser.parse_args()
+    args = parser.parse_args()
+    settings = load_params(args.params)
+    args.goldens = config_path("goldens")
+    args.retrieval_mode = settings.retrieval.mode
+    args.case_id, args.limit = settings.evaluation.case_ids, settings.evaluation.limit
+    args.workers = settings.evaluation.workers
+    args.metric_timeout_seconds = settings.evaluation.metric_timeout_seconds
+    return args
 
 
 def validate_goldens(data: Any) -> list[dict[str, Any]]:
@@ -193,67 +172,93 @@ def empty_answer_metric(metric_name: str) -> dict[str, Any]:
 
     return {
         "score": 0.0,
-        "threshold": 0.5,
+        "threshold": metric_threshold(metric_name),
         "success": False,
         "reason": "The baseline generator returned an empty answer.",
         "error": "empty_actual_output",
     }
 
 
-def invoke_rag_with_backoff(rag_graph, question: str, attempts: int = 4):
+def invoke_rag_with_backoff(rag_graph, question: str, attempts: int | None = None):
     """Retry transient provider rate limits without changing model output."""
 
+    settings = get_params().evaluation
+    attempts = settings.generation_attempts if attempts is None else attempts
     for attempt in range(1, attempts + 1):
         try:
             return rag_graph.invoke(
                 {"question": question, "documents": [], "answer": ""}
             )
         except Exception as error:
-            is_rate_limit = type(error).__name__ == "RateLimitError" or "429" in str(error)
+            is_rate_limit = type(error).__name__ == "RateLimitError" or "429" in str(
+                error
+            )
             if not is_rate_limit or attempt == attempts:
                 raise
-            delay = 5 * attempt
-            print(f"Rate limit for generation; retrying in {delay}s ({attempt}/{attempts})")
+            delay = settings.generation_backoff_seconds * attempt
+            print(
+                f"Rate limit for generation; retrying in {delay}s ({attempt}/{attempts})"
+            )
             time.sleep(delay)
 
 
-async def measure_case_metrics(test_case, metrics, case_output, *, timeout, prefix, checkpoint=None):
+async def measure_case_metrics(
+    test_case, metrics, case_output, *, timeout, prefix, checkpoint=None
+):
     """Run independent DeepEval async metrics together; retain partial failures."""
+
     async def measure(metric):
         name = metric.__name__
         saved = case_output["metrics"].get(name)
         if saved and saved.get("error") is None and saved.get("score") is not None:
             return
         if not str(test_case.actual_output).strip() and name in {
-            "Answer Relevancy", "Faithfulness", "Answer Simplicity", "Answer Correctness"
+            "Answer Relevancy",
+            "Faithfulness",
+            "Answer Simplicity",
+            "Answer Correctness",
         }:
             case_output["metrics"][name] = empty_answer_metric(name)
         else:
             print(f"{prefix} judge started: {name}", flush=True)
             try:
                 await asyncio.wait_for(
-                    metric.a_measure(test_case, _show_indicator=False,
-                                     _log_metric_to_confident=False), timeout=timeout,
+                    metric.a_measure(
+                        test_case, _show_indicator=False, _log_metric_to_confident=False
+                    ),
+                    timeout=timeout,
                 )
                 case_output["metrics"][name] = serialize_metric(metric)
                 case_output["metrics"][name]["evaluation_cost"] = metric.evaluation_cost
             except Exception as error:
                 case_output["metrics"][name] = {
-                    "score": None, "threshold": metric.threshold, "success": False,
-                    "reason": None, "error": f"{type(error).__name__}: {error}",
+                    "score": None,
+                    "threshold": metric.threshold,
+                    "success": False,
+                    "reason": None,
+                    "error": f"{type(error).__name__}: {error}",
                 }
                 if checkpoint:
                     checkpoint(case_output)
-                print(f"{prefix} judge failed: {name}: {type(error).__name__}", flush=True)
+                print(
+                    f"{prefix} judge failed: {name}: {type(error).__name__}", flush=True
+                )
                 raise
         if checkpoint:
             checkpoint(case_output)
-        print(f"{prefix} judge finished: {name}={case_output['metrics'][name]['score']}", flush=True)
+        print(
+            f"{prefix} judge finished: {name}={case_output['metrics'][name]['score']}",
+            flush=True,
+        )
 
-    results = await asyncio.gather(*(measure(metric) for metric in metrics), return_exceptions=True)
+    results = await asyncio.gather(
+        *(measure(metric) for metric in metrics), return_exceptions=True
+    )
     errors = [result for result in results if isinstance(result, Exception)]
     if errors:
-        raise RuntimeError(f"{len(errors)} metric(s) failed: {errors[0]}") from errors[0]
+        raise RuntimeError(f"{len(errors)} metric(s) failed: {errors[0]}") from errors[
+            0
+        ]
 
 
 def evaluate_case(
@@ -274,12 +279,18 @@ def evaluate_case(
         rag_result = invoke_rag_with_backoff(rag_graph, golden["question"])
         retrieval_context = render_retrieval_context(rag_result["documents"])
         case_output = {
-            "case_id": case_id, "question": golden["question"],
-            "expected_answer": golden["expected_answer"], "actual_answer": rag_result["answer"],
+            "case_id": case_id,
+            "question": golden["question"],
+            "expected_answer": golden["expected_answer"],
+            "actual_answer": rag_result["answer"],
             "expected_context": golden["expected_context"],
-            "retrieval_context": retrieval_context, "metrics": {},
+            "retrieval_context": retrieval_context,
+            "metrics": {},
         }
-        print(f"{prefix} generation finished: {len(str(rag_result['answer']))} answer characters", flush=True)
+        print(
+            f"{prefix} generation finished: {len(str(rag_result['answer']))} answer characters",
+            flush=True,
+        )
     else:
         if existing_case["question"] != golden["question"]:
             raise ValueError("Saved case question does not match the golden dataset.")
@@ -288,18 +299,24 @@ def evaluate_case(
     if checkpoint:
         checkpoint(case_output)
     test_case = LLMTestCase(
-        input=golden["question"], actual_output=case_output["actual_answer"],
-        expected_output=golden["expected_answer"], context=golden["expected_context"],
-        retrieval_context=case_output["retrieval_context"], name=case_id,
+        input=golden["question"],
+        actual_output=case_output["actual_answer"],
+        expected_output=golden["expected_answer"],
+        context=golden["expected_context"],
+        retrieval_context=case_output["retrieval_context"],
+        name=case_id,
     )
 
     # HTTP judging needs sockets only. On Windows, avoid Proactor completion
     # callbacks racing with per-worker loop teardown (WinError 995/InvalidState).
     asyncio.run(
         measure_case_metrics(
-            test_case, build_full_pipeline_metrics(judge_model, async_mode=True), case_output,
-            timeout=hyperparameters.get("metric_timeout_seconds", 300),
-            prefix=prefix, checkpoint=checkpoint,
+            test_case,
+            build_full_pipeline_metrics(judge_model, async_mode=True),
+            case_output,
+            timeout=get_params().evaluation.metric_timeout_seconds,
+            prefix=prefix,
+            checkpoint=checkpoint,
         ),
         loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None,
     )
@@ -317,29 +334,12 @@ def main() -> None:
     retrieval_id = retrieval_name(args.retrieval_mode)
     retrieval_config = retrieval_metadata(args.retrieval_mode)
     label = args.label or retrieval_id
-    if args.limit is not None and args.limit < 1:
-        raise ValueError("--limit must be at least 1.")
-    if args.workers < 1:
-        raise ValueError("--workers must be at least 1.")
-    if args.metric_timeout_seconds < 1:
-        raise ValueError("--metric-timeout-seconds must be at least 1.")
 
     # Dataset validation, selection, and resume identity checks intentionally happen
     # before prompt, embedding, generation, or judge clients can make hosted calls.
     goldens, goldens_hash = load_goldens(args.goldens)
-    indexed_goldens = list(enumerate(goldens, start=1))
+    indexed_goldens = select_cases(goldens)
     selected_ids = set(args.case_id or [])
-    if selected_ids:
-        indexed_goldens = [
-            (index, golden)
-            for index, golden in indexed_goldens
-            if f"manual_{index:03d}" in selected_ids
-        ]
-        found_ids = {f"manual_{index:03d}" for index, _ in indexed_goldens}
-        if missing_ids := selected_ids - found_ids:
-            raise ValueError(f"Unknown case IDs: {sorted(missing_ids)}")
-    elif args.limit is not None:
-        indexed_goldens = indexed_goldens[: args.limit]
 
     load_dotenv()
     generator_config = generator_model_config()
@@ -349,30 +349,23 @@ def main() -> None:
     if args.resume:
         json_path = args.resume
         output = json.loads(json_path.read_text(encoding="utf-8"))
+        validate_resume_config(output["run"])
         validate_resume_input(output, goldens_hash=goldens_hash, label=label)
         validate_resume_generator(
             output, provider=generator_provider, model=generator_model
         )
-        validate_resume_retrieval(
-            output, retrieval_config=retrieval_config
-        )
+        validate_resume_retrieval(output, retrieval_config=retrieval_config)
 
     os.environ["DEEPEVAL_PER_ATTEMPT_TIMEOUT_SECONDS_OVERRIDE"] = str(
         args.metric_timeout_seconds
     )
     truststore.inject_into_ssl()
 
-    judge_model = os.getenv(
-        "COATING_COMPASS_EVALUATION_MODEL", "gpt-5-mini-2025-08-07"
-    )
-    embedding_model = os.getenv(
-        "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
-    )
+    judge_model = get_params().evaluation.judge_model
+    embedding_model = get_params().embeddings.model
     if retrieval_config["retrieval_mode"] == "contextual-bm25":
         embedding_model = None
     prompt_version = fetch_baseline_prompt()
-    retriever = build_retriever(args.retrieval_mode)
-    rag_graph = create_rag_graph(retriever, prompt_version.text)
 
     if args.resume:
         saved_prompt_version = output["run"].get("prompt_version")
@@ -391,10 +384,11 @@ def main() -> None:
     else:
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         stem = f"full_pipeline_{label}_{timestamp}"
-        json_path = REPORTS_DIRECTORY / f"{stem}.json"
-        markdown_path = REPORTS_DIRECTORY / f"{stem}.md"
+        json_path = config_path("reports") / f"{stem}.json"
+        markdown_path = config_path("reports") / f"{stem}.md"
         output = {
             "run": {
+                **config_snapshot(),
                 "label": label,
                 "timestamp_utc": timestamp,
                 "status": "running",
@@ -406,9 +400,7 @@ def main() -> None:
                 "generator_provider": generator_provider,
                 "generator_model": generator_model,
                 "generator_max_tokens": generator_config["max_tokens"],
-                "generator_reasoning_effort": generator_config.get(
-                    "reasoning_effort"
-                ),
+                "generator_reasoning_effort": generator_config.get("reasoning_effort"),
                 "judge_model": judge_model,
                 "goldens_path": str(args.goldens),
                 "goldens_sha256": goldens_hash,
@@ -429,9 +421,11 @@ def main() -> None:
         "generator_max_tokens": generator_config["max_tokens"],
         "generator_reasoning_effort": generator_config.get("reasoning_effort"),
         "judge_model": judge_model,
-        "retrieval_k": RETRIEVAL_K,
+        "retrieval_k": get_params().retrieval.k,
         "metric_timeout_seconds": args.metric_timeout_seconds,
     }
+    retriever = build_retriever(args.retrieval_mode)
+    rag_graph = create_rag_graph(retriever, prompt_version.text)
     completed_ids = {case["case_id"] for case in output["cases"]}
     pending_goldens = [
         (index, golden)

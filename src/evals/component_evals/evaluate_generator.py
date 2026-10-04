@@ -1,10 +1,8 @@
 import argparse
 import hashlib
 import json
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
-from pathlib import Path
 
 import truststore
 from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
@@ -12,27 +10,38 @@ from deepeval.test_case import LLMTestCase
 from dotenv import load_dotenv
 
 from src.app.basic_rag import (
-    RETRIEVAL_MODES,
     build_retriever,
     create_rag_graph,
     retrieval_metadata,
 )
 from src.app.evidence import render_retrieval_context
 from src.app.prompt_registry import fetch_baseline_prompt
+from src.config import (
+    add_params_argument,
+    config_snapshot,
+    get_params,
+    load_params,
+    metric_threshold,
+    select_cases,
+    validate_resume_config,
+)
+from src.config import path as config_path
 
-GOLDENS_PATH = Path("data/evaluations/manual_golden_dataset.json")
-RESULTS_DIRECTORY = Path("data/evaluations/results")
-REPORT_PATH = Path("data/evaluations/generator_evaluation_report.md")
 METRIC_NAMES = ["Answer Relevancy", "Faithfulness"]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate the baseline generator.")
-    parser.add_argument("--label", default="baseline")
-    parser.add_argument(
-        "--retrieval-mode", choices=RETRIEVAL_MODES, default="auto"
+    parser = argparse.ArgumentParser(description="Evaluate the configured component.")
+    add_params_argument(parser)
+    parser.add_argument("--label", help="Run label.")
+    args = parser.parse_args()
+    settings = load_params(args.params)
+    args.label = args.label or settings.evaluation.component_label
+    args.retrieval_mode, args.case_id = (
+        settings.retrieval.mode,
+        settings.evaluation.case_ids,
     )
-    return parser.parse_args()
+    return args
 
 
 def evaluate_case(test_case: LLMTestCase, judge_model: str) -> dict:
@@ -40,7 +49,7 @@ def evaluate_case(test_case: LLMTestCase, judge_model: str) -> dict:
         metric_results = {
             name: {
                 "score": 0.0,
-                "threshold": 0.5,
+                "threshold": metric_threshold(name),
                 "success": False,
                 "reason": "The baseline generator returned an empty answer.",
                 "error": "empty_actual_output",
@@ -50,8 +59,16 @@ def evaluate_case(test_case: LLMTestCase, judge_model: str) -> dict:
     else:
         metric_results = {}
         for metric in (
-            AnswerRelevancyMetric(model=judge_model, async_mode=False),
-            FaithfulnessMetric(model=judge_model, async_mode=False),
+            AnswerRelevancyMetric(
+                model=judge_model,
+                threshold=get_params().evaluation.thresholds.answer_relevancy,
+                async_mode=False,
+            ),
+            FaithfulnessMetric(
+                model=judge_model,
+                threshold=get_params().evaluation.thresholds.faithfulness,
+                async_mode=False,
+            ),
         ):
             metric.measure(test_case)
             metric_results[metric.__name__] = {
@@ -73,7 +90,7 @@ def evaluate_case(test_case: LLMTestCase, judge_model: str) -> dict:
 
 def write_markdown_report() -> None:
     runs = []
-    for path in RESULTS_DIRECTORY.glob("generator_*.json"):
+    for path in config_path("evaluation_results").glob("generator_*.json"):
         run = json.loads(path.read_text(encoding="utf-8"))
         if run.get("run", {}).get("status") == "complete":
             runs.append(run)
@@ -99,6 +116,7 @@ def write_markdown_report() -> None:
                 f"- Generator model: `{metadata['generator_model']}`",
                 f"- Judge model: `{metadata['evaluation_model']}`",
                 f"- Golden dataset SHA-256: `{metadata['goldens_sha256']}`",
+                f"- Parameters SHA-256: `{metadata.get('params_sha256', 'not recorded (historical run)')}`",
                 "",
                 "| Metric | Average | Passed |",
                 "|---|---:|---:|",
@@ -138,36 +156,40 @@ def write_markdown_report() -> None:
             f"| {label} | {run['averages']['Answer Relevancy']:.3f} | "
             f"{run['averages']['Faithfulness']:.3f} | {len(run['cases'])} |"
         )
-    REPORT_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    config_path("generator_report").parent.mkdir(parents=True, exist_ok=True)
+    config_path("generator_report").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
 
 
 def main() -> None:
     args = parse_args()
     truststore.inject_into_ssl()
     load_dotenv()
-    goldens = json.loads(GOLDENS_PATH.read_text(encoding="utf-8"))
-    prompt_version = fetch_baseline_prompt()
-    retrieval_config = retrieval_metadata(args.retrieval_mode)
-    rag_graph = create_rag_graph(
-        build_retriever(args.retrieval_mode), prompt_version.text
-    )
-    judge_model = os.getenv(
-        "COATING_COMPASS_GENERATOR_JUDGE_MODEL", "gpt-5-mini-2025-08-07"
-    )
-    generator_model = os.getenv("COATING_COMPASS_GROQ_MODEL", "openai/gpt-oss-20b")
-    RESULTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    goldens_hash = hashlib.sha256(GOLDENS_PATH.read_bytes()).hexdigest()
+    goldens = json.loads(config_path("goldens").read_text(encoding="utf-8"))
+    goldens_hash = hashlib.sha256(config_path("goldens").read_bytes()).hexdigest()
+    indexed_goldens = select_cases(goldens)
     partial_runs = []
-    for path in RESULTS_DIRECTORY.glob(f"generator_{args.label}_*.json"):
+    for path in config_path("evaluation_results").glob(
+        f"generator_{args.label}_*.json"
+    ):
         candidate = json.loads(path.read_text(encoding="utf-8"))
         run = candidate.get("run", {})
         if run.get("status") == "running" and run.get("goldens_sha256") == goldens_hash:
             partial_runs.append((path, candidate))
 
+    for _, candidate in partial_runs:
+        validate_resume_config(candidate["run"])
+    prompt_version = fetch_baseline_prompt()
+    retrieval_config = retrieval_metadata(args.retrieval_mode)
+    judge_model = get_params().evaluation.generator_judge_model
+    generator_model = get_params().generator.model
+    config_path("evaluation_results").mkdir(parents=True, exist_ok=True)
     if partial_runs:
         output_path, output = max(
             partial_runs, key=lambda item: item[1]["run"]["timestamp_utc"]
         )
+        validate_resume_config(output["run"])
         saved_prompt_version = output["run"].get("prompt_version")
         if (
             saved_prompt_version is not None
@@ -176,14 +198,23 @@ def main() -> None:
             raise ValueError("Cannot resume: Langfuse prompt version has changed.")
         if output["run"].get("collection") != retrieval_config["collection"]:
             raise ValueError("Cannot resume: retrieval mode has changed.")
-        if output["run"].get("bm25_implementation") != retrieval_config["bm25_implementation"]:
+        if (
+            output["run"].get("bm25_implementation")
+            != retrieval_config["bm25_implementation"]
+        ):
             raise ValueError("Cannot resume: BM25 implementation has changed.")
-        print(f"Resuming {len(output['cases'])}/20 cases from {output_path}")
+        print(
+            f"Resuming {len(output['cases'])}/{len(indexed_goldens)} cases from {output_path}"
+        )
     else:
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        output_path = RESULTS_DIRECTORY / f"generator_{args.label}_{timestamp}.json"
+        output_path = (
+            config_path("evaluation_results")
+            / f"generator_{args.label}_{timestamp}.json"
+        )
         output = {
             "run": {
+                **config_snapshot(),
                 "label": args.label,
                 "timestamp_utc": timestamp,
                 "status": "running",
@@ -191,6 +222,7 @@ def main() -> None:
                 "prompt_label": prompt_version.label,
                 "prompt_version": prompt_version.version,
                 **retrieval_config,
+                "generator_provider": get_params().generator.provider,
                 "generator_model": generator_model,
                 "evaluation_model": judge_model,
                 "goldens_sha256": goldens_hash,
@@ -199,9 +231,12 @@ def main() -> None:
             "cases": [],
         }
 
+    rag_graph = create_rag_graph(
+        build_retriever(args.retrieval_mode), prompt_version.text
+    )
     completed_ids = {case["case_id"] for case in output["cases"]}
     pending = []
-    for index, golden in enumerate(goldens, start=1):
+    for index, golden in indexed_goldens:
         case_id = f"manual_{index:03d}"
         if case_id in completed_ids:
             continue
@@ -218,7 +253,12 @@ def main() -> None:
             )
         )
 
-    with ThreadPoolExecutor(max_workers=max(1, len(pending))) as executor:
+    with ThreadPoolExecutor(
+        max_workers=min(
+            get_params().evaluation.component_generator_workers or len(pending) or 1,
+            len(pending) or 1,
+        )
+    ) as executor:
         futures = {
             executor.submit(evaluate_case, test_case, judge_model): test_case.name
             for test_case in pending
@@ -240,11 +280,13 @@ def main() -> None:
                 json.dumps(output, indent=2, ensure_ascii=False) + "\n",
                 encoding="utf-8",
             )
-            print(f"Saved {len(output['cases'])}/{len(goldens)} cases to {output_path}")
+            print(
+                f"Saved {len(output['cases'])}/{len(indexed_goldens)} cases to {output_path}"
+            )
 
-    if len(output["cases"]) != len(goldens):
+    if len(output["cases"]) != len(indexed_goldens):
         raise RuntimeError(
-            f"Saved {len(output['cases'])}/{len(goldens)} cases; rerun to retry pending cases."
+            f"Saved {len(output['cases'])}/{len(indexed_goldens)} cases; rerun to retry pending cases."
         )
 
     output["cases"].sort(key=lambda case: case["case_id"])
@@ -263,8 +305,7 @@ def main() -> None:
     for name, average in output["averages"].items():
         passed = sum(case["metrics"][name]["success"] for case in output["cases"])
         print(
-            f"- {name}: average={average:.3f}, "
-            f"passed={passed}/{len(output['cases'])}"
+            f"- {name}: average={average:.3f}, passed={passed}/{len(output['cases'])}"
         )
     print(f"Saved generator evaluation results to {output_path}")
 

@@ -193,8 +193,10 @@ dependencies = [
     { name = "langchain-text-splitters" },
     { name = "langfuse" },
     { name = "langgraph" },
+    { name = "pydantic" },
     { name = "pypdf" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "rank-bm25" },
     { name = "truststore" },
 ]
@@ -210,8 +212,10 @@ requires-dist = [
     { name = "langchain-text-splitters", specifier = ">=1.0,<2" },
     { name = "langfuse", specifier = ">=4.15.6" },
     { name = "langgraph", specifier = ">=1.0,<2" },
+    { name = "pydantic", specifier = ">=2,<3" },
     { name = "pypdf", specifier = ">=6.0,<7" },
     { name = "python-dotenv", specifier = ">=1.1,<2" },
+    { name = "pyyaml", specifier = ">=6,<7" },
     { name = "rank-bm25", specifier = ">=0.2.2,<0.3" },
     { name = "truststore", specifier = ">=0.10,<1" },
 ]

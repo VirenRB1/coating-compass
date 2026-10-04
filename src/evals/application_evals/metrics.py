@@ -15,6 +15,10 @@ from deepeval.metrics import (
 )
 from deepeval.test_case import SingleTurnParams
 
+from src.config import (
+    get_params,
+)
+
 METRIC_NAMES = [
     "Contextual Recall",
     "Contextual Precision",
@@ -34,16 +38,36 @@ def build_full_pipeline_metrics(judge_model: str, *, async_mode: bool = False) -
     """
 
     return [
-        ContextualRecallMetric(model=judge_model, async_mode=async_mode),
-        ContextualPrecisionMetric(model=judge_model, async_mode=async_mode),
-        ContextualRelevancyMetric(model=judge_model, async_mode=async_mode),
-        AnswerRelevancyMetric(model=judge_model, async_mode=async_mode),
-        FaithfulnessMetric(model=judge_model, async_mode=async_mode),
+        ContextualRecallMetric(
+            model=judge_model,
+            threshold=get_params().evaluation.thresholds.contextual_recall,
+            async_mode=async_mode,
+        ),
+        ContextualPrecisionMetric(
+            model=judge_model,
+            threshold=get_params().evaluation.thresholds.contextual_precision,
+            async_mode=async_mode,
+        ),
+        ContextualRelevancyMetric(
+            model=judge_model,
+            threshold=get_params().evaluation.thresholds.contextual_relevancy,
+            async_mode=async_mode,
+        ),
+        AnswerRelevancyMetric(
+            model=judge_model,
+            threshold=get_params().evaluation.thresholds.answer_relevancy,
+            async_mode=async_mode,
+        ),
+        FaithfulnessMetric(
+            model=judge_model,
+            threshold=get_params().evaluation.thresholds.faithfulness,
+            async_mode=async_mode,
+        ),
         GEval(
             name="Answer Simplicity",
             _include_g_eval_suffix=False,
             model=judge_model,
-            threshold=0.5,
+            threshold=get_params().evaluation.thresholds.answer_simplicity,
             async_mode=async_mode,
             evaluation_params=[
                 SingleTurnParams.INPUT,
@@ -61,7 +85,7 @@ def build_full_pipeline_metrics(judge_model: str, *, async_mode: bool = False) -
             name="Answer Correctness",
             _include_g_eval_suffix=False,
             model=judge_model,
-            threshold=0.5,
+            threshold=get_params().evaluation.thresholds.answer_correctness,
             async_mode=async_mode,
             evaluation_params=[
                 SingleTurnParams.INPUT,

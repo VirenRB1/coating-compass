@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -12,34 +11,30 @@ from langchain_openai import ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
-SOURCE_DIRECTORY = Path("data/dulux_canada_knowledge_sources")
-DEFAULT_REQUESTS_PATH = Path("data/evaluations/golden_generation_requests.json")
-DEFAULT_OUTPUT_PATH = Path("data/evaluations/manual_golden_dataset.json")
+from src.config import (
+    add_params_argument,
+    get_params,
+    load_params,
+)
+from src.config import path as config_path
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate expert-reviewable RAG goldens from selected local PDFs."
+        description="Generate expert-reviewable RAG goldens."
     )
-    parser.add_argument("--requests", type=Path, default=DEFAULT_REQUESTS_PATH)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
+    add_params_argument(parser)
     parser.add_argument(
-        "--case-id",
-        action="append",
-        help="Generate only this case ID. Repeat to select multiple cases.",
+        "--generate", action="store_true", help="Acknowledge hosted generation costs."
     )
-    parser.add_argument(
-        "--generate",
-        action="store_true",
-        help="Call the configured hosted model. Without this flag, only validate inputs.",
+    args = parser.parse_args()
+    settings = load_params(args.params).golden_generation
+    args.requests, args.output = config_path("golden_requests"), config_path("goldens")
+    args.case_id, args.context_char_budget = (
+        settings.case_ids,
+        settings.context_char_budget,
     )
-    parser.add_argument(
-        "--context-char-budget",
-        type=int,
-        default=16_000,
-        help="Maximum extracted source characters sent for each case.",
-    )
-    return parser.parse_args()
+    return args
 
 
 def load_requests(path: Path) -> list[dict[str, Any]]:
@@ -65,10 +60,16 @@ def validate_request(request: dict[str, Any]) -> list[Path]:
     missing = [field for field in required if not request.get(field)]
     if missing:
         raise ValueError(f"{request.get('case_id', '<unknown>')}: missing {missing}")
-    if has_placeholder([request["question"], request["pdf_filenames"], request["answer_guidance"]]):
-        raise ValueError(f"{request['case_id']}: replace all angle-bracket placeholders")
+    if has_placeholder(
+        [request["question"], request["pdf_filenames"], request["answer_guidance"]]
+    ):
+        raise ValueError(
+            f"{request['case_id']}: replace all angle-bracket placeholders"
+        )
 
-    pdf_paths = [SOURCE_DIRECTORY / filename for filename in request["pdf_filenames"]]
+    pdf_paths = [
+        config_path("sources") / filename for filename in request["pdf_filenames"]
+    ]
     missing_pdfs = [str(path) for path in pdf_paths if not path.is_file()]
     if missing_pdfs:
         raise ValueError(f"{request['case_id']}: PDFs not found: {missing_pdfs}")
@@ -79,7 +80,7 @@ def search_terms(text: str) -> set[str]:
     return {
         token
         for token in re.findall(r"[a-z0-9]+", text.lower())
-        if len(token) >= 4
+        if len(token) >= get_params().golden_generation.min_search_term_length
     }
 
 
@@ -95,9 +96,9 @@ def extract_relevant_pdf_text(
         raise ValueError("The context character budget must be at least 4000.")
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1_800,
-        chunk_overlap=150,
-        separators=["\n\n", "\n", ". ", " ", ""],
+        chunk_size=get_params().golden_generation.chunk_size,
+        chunk_overlap=get_params().golden_generation.chunk_overlap,
+        separators=list(get_params().chunking.separators),
     )
     terms = search_terms(query)
     candidates: list[dict[str, Any]] = []
@@ -234,7 +235,9 @@ def main() -> None:
         if not selected_ids or request.get("case_id") in selected_ids
     ]
     if selected_ids - {request.get("case_id") for request in selected}:
-        missing = sorted(selected_ids - {request.get("case_id") for request in selected})
+        missing = sorted(
+            selected_ids - {request.get("case_id") for request in selected}
+        )
         raise ValueError(f"Unknown case IDs: {missing}")
 
     validated: list[tuple[dict[str, Any], list[Path]]] = []
@@ -254,15 +257,14 @@ def main() -> None:
         return
 
     load_dotenv()
-    model_name = os.getenv(
-        "COATING_COMPASS_GOLDEN_MODEL", "gpt-5-mini-2025-08-07"
-    )
+    settings = get_params().golden_generation
+    model_name = settings.model
     print(f"Generating with OpenAI model {model_name}.")
     model = ChatOpenAI(
         model=model_name,
-        temperature=0,
-        max_tokens=4_000,
-        reasoning_effort="minimal",
+        temperature=settings.temperature,
+        max_tokens=settings.max_tokens,
+        reasoning_effort=settings.reasoning_effort,
         model_kwargs={"response_format": {"type": "json_object"}},
     )
     generated_goldens = [

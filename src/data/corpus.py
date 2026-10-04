@@ -9,10 +9,10 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
-SOURCE_DIRECTORY = Path("data/dulux_canada_knowledge_sources")
-MANIFEST_PATH = SOURCE_DIRECTORY / "manifest.json"
-CHUNK_SIZE = 1_000
-CHUNK_OVERLAP = 150
+from src.config import (
+    get_params,
+)
+from src.config import path as config_path
 
 
 def file_sha256(path: Path) -> str:
@@ -24,7 +24,7 @@ def file_sha256(path: Path) -> str:
 
 
 def load_manifest_metadata() -> dict[str, dict]:
-    products = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    products = json.loads(config_path("source_manifest").read_text(encoding="utf-8"))
     metadata_by_filename: dict[str, dict] = {}
     for product in products:
         for document_type in ("tds", "sds"):
@@ -41,7 +41,7 @@ def load_manifest_metadata() -> dict[str, dict]:
 
 
 def source_paths(document: str | None = None) -> list[Path]:
-    paths = sorted(SOURCE_DIRECTORY.glob("*.pdf"))
+    paths = sorted(config_path("sources").glob("*.pdf"))
     if document is None:
         return paths
     selected = [path for path in paths if path.name == document]
@@ -74,10 +74,10 @@ def extract_pages(pdf_path: Path, metadata: dict) -> list[Document]:
 
 def split_pages(pages: list[Document]) -> list[Document]:
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
+        chunk_size=get_params().chunking.size,
+        chunk_overlap=get_params().chunking.overlap,
         add_start_index=True,
-        separators=["\n\n", "\n", ". ", " ", ""],
+        separators=list(get_params().chunking.separators),
     )
     return splitter.split_documents(pages)
 
@@ -98,8 +98,8 @@ def stable_chunk_id(document: Document) -> str:
             document.metadata["document_sha256"],
             str(document.metadata["page_number"]),
             str(document.metadata.get("start_index", 0)),
-            str(CHUNK_SIZE),
-            str(CHUNK_OVERLAP),
+            str(get_params().chunking.size),
+            str(get_params().chunking.overlap),
             document.page_content,
         ]
     )
@@ -109,7 +109,6 @@ def stable_chunk_id(document: Document) -> str:
 
 def render_full_document(pages: list[Document]) -> str:
     return "\n\n".join(
-        f"<page number=\"{page.metadata['page_number']}\">\n"
-        f"{page.page_content}\n</page>"
+        f'<page number="{page.metadata["page_number"]}">\n{page.page_content}\n</page>'
         for page in pages
     )

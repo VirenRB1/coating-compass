@@ -1,0 +1,100 @@
+# Experiment settings. Credentials and service endpoints belong in .env.
+schema_version: 1
+paths:
+  sources: data/dulux_canada_knowledge_sources
+  source_manifest: data/dulux_canada_knowledge_sources/manifest.json
+  vector_store: data/vector_store/qdrant
+  contextual_artifacts: data/processed/contextual_dense_v1
+  golden_requests: data/evaluations/golden_generation_requests.json
+  goldens: data/evaluations/manual_golden_dataset.json
+  evaluation_results: data/evaluations/results
+  reports: reports
+  retriever_report: data/evaluations/retriever_evaluation_report.md
+  generator_report: data/evaluations/generator_evaluation_report.md
+chunking:
+  size: 1000
+  overlap: 150
+  separators: ["\n\n", "\n", ". ", " ", ""]
+  pdf_limit: null
+embeddings:
+  model: text-embedding-3-small
+  dimensions: 1536
+  timeout_seconds: 60
+  max_retries: 2
+  contextual_batch_size: 64
+generator:
+  provider: groq
+  model: openai/gpt-oss-20b
+  temperature: 0
+  max_tokens: 2000
+  timeout_seconds: 30
+  max_retries: 2
+  reasoning_effort: low
+retrieval:
+  mode: auto
+  k: 5
+  search_type: similarity
+  distance: Cosine
+  baseline_collection: coating-compass-baseline-v1
+  contextual_collection: coating-compass-contextual-dense-v1
+  bm25_name: coating-compass-contextual-bm25-v2
+  bm25_k1: 1.5
+  bm25_b: 0.75
+contextualization:
+  knowledge_base_version: contextual-dense-v1
+  provider: groq
+  groq_model: openai/gpt-oss-20b
+  openai_model: gpt-5-mini
+  groq_temperature: 0
+  openai_temperature: null # preserve provider/model default; GPT-5 mini does not accept custom temperature
+  max_tokens: 300
+  timeout_seconds: 60
+  max_retries: 0
+  reasoning_effort: low
+  max_attempts: 5
+  retry_backoff_base: 2
+  retry_wait_margin_seconds: 1
+  requested_min_tokens: 50
+  requested_max_tokens: 100
+  min_context_tokens: 50
+  max_context_tokens: 120
+  document: null
+golden_generation:
+  model: gpt-5-mini-2025-08-07
+  temperature: 0
+  max_tokens: 4000
+  reasoning_effort: minimal
+  context_char_budget: 16000
+  chunk_size: 1800
+  chunk_overlap: 150
+  min_search_term_length: 4
+  case_ids: []
+prompt:
+  name: coating_compass_baseline_prompt
+  label: baseline
+  registration_tags: [rag, system-prompt]
+evaluation:
+  judge_model: gpt-5-mini-2025-08-07
+  generator_judge_model: gpt-5-mini-2025-08-07
+  retriever_write_cache: true
+  retriever_use_cache: true
+  workers: 4
+  comparison_workers: 40
+  component_generator_workers: null # null retains one worker per pending case
+  generator_rpm: 3
+  metric_timeout_seconds: 300
+  generation_attempts: 4
+  generation_backoff_seconds: 5
+  case_ids: []
+  limit: null
+  component_label: baseline
+  comparison_label: ab-20261003-parallel
+  comparison_modes: [baseline-dense, contextual-dense]
+  thresholds:
+    contextual_recall: 0.5
+    contextual_precision: 0.5
+    contextual_relevancy: 0.5
+    answer_relevancy: 0.5
+    faithfulness: 0.5
+    answer_simplicity: 0.5
+    answer_correctness: 0.5

@@ -8,8 +8,9 @@ from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 from langchain_core.runnables import Runnable, RunnableLambda
 
-DEFAULT_K1 = 1.5
-DEFAULT_B = 0.75
+from src.config import (
+    get_params,
+)
 
 
 def tokenize(text: str) -> list[str]:
@@ -20,15 +21,19 @@ def tokenize(text: str) -> list[str]:
 def ContextualBM25Retriever(
     contextual_documents: Iterable[tuple[str, Document, str]],
     *,
-    k: int = 5,
-    k1: float = DEFAULT_K1,
-    b: float = DEFAULT_B,
+    k: int | None = None,
+    k1: float | None = None,
+    b: float | None = None,
 ) -> Runnable[str, list[Document]]:
     """Compose maintained ranking with overlap filtering and original-only output.
 
     Rank all candidates before filtering: BM25Okapi can assign zero or negative
     scores to matching terms in small corpora. Overlap excludes unrelated chunks.
     """
+    settings = get_params().retrieval
+    k = settings.k if k is None else k
+    k1 = settings.bm25_k1 if k1 is None else k1
+    b = settings.bm25_b if b is None else b
     if k < 1:
         raise ValueError("k must be positive.")
     if not math.isfinite(k1) or k1 < 0:
@@ -56,7 +61,9 @@ def ContextualBM25Retriever(
         raise ValueError("At least one contextual document is required.")
 
     ranker = BM25Retriever.from_documents(
-        indexed, k=len(indexed), preprocess_func=tokenize,
+        indexed,
+        k=len(indexed),
+        preprocess_func=tokenize,
         bm25_params={"k1": k1, "b": b},
     )
 
@@ -70,5 +77,6 @@ def ContextualBM25Retriever(
 
     # Runnable composition propagates LangChain callbacks/config to the ranker.
     return {
-        "query": RunnableLambda(lambda query: query), "ranked": ranker,
+        "query": RunnableLambda(lambda query: query),
+        "ranked": ranker,
     } | RunnableLambda(original_evidence)

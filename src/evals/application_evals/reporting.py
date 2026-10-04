@@ -36,8 +36,10 @@ def write_markdown_report(output_path: Path, result: dict[str, Any]) -> None:
     lines = [
         "# Full Pipeline Evaluation",
         "",
-        ("DeepEval scores use a 0-1 scale. GEval scores are model judgments and "
-         "must be reviewed alongside their reasons and coating-domain checks."),
+        (
+            "DeepEval scores use a 0-1 scale. GEval scores are model judgments and "
+            "must be reviewed alongside their reasons and coating-domain checks."
+        ),
         "",
         "## Run metadata",
         "",
@@ -56,6 +58,7 @@ def write_markdown_report(output_path: Path, result: dict[str, Any]) -> None:
         f"- Parallel case workers: `{run['workers']}`",
         f"- Per-metric timeout: `{run['metric_timeout_seconds']} seconds`",
         f"- Golden dataset SHA-256: `{run['goldens_sha256']}`",
+        f"- Parameters SHA-256: `{run.get('params_sha256', 'not recorded (historical run)')}`",
         "",
         "## Aggregate results",
         "",
@@ -84,10 +87,14 @@ def write_markdown_report(output_path: Path, result: dict[str, Any]) -> None:
 
     lines.extend(["", "## Judge reasons", ""])
     for case in cases:
-        lines.extend([f"### {case['case_id']}", "", f"**Question:** {case['question']}", ""])
+        lines.extend(
+            [f"### {case['case_id']}", "", f"**Question:** {case['question']}", ""]
+        )
         for name in METRIC_NAMES:
             metric = case["metrics"][name]
-            reason = metric.get("reason") or metric.get("error") or "No reason returned."
+            reason = (
+                metric.get("reason") or metric.get("error") or "No reason returned."
+            )
             lines.append(
                 f"- **{name} ({metric['score']:.3f}):** "
                 f"{str(reason).replace(chr(10), ' ')}"

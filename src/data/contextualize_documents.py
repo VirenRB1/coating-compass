@@ -23,9 +23,13 @@ from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
+from src.config import (
+    add_params_argument,
+    get_params,
+    load_params,
+)
+from src.config import path as config_path
 from src.data.corpus import (
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
     extract_pages,
     load_manifest_metadata,
     render_full_document,
@@ -34,23 +38,27 @@ from src.data.corpus import (
     stable_chunk_id,
 )
 
-KB_VERSION = "contextual-dense-v1"
-GROQ_MODEL = "openai/gpt-oss-20b"
-OPENAI_MODEL = "gpt-5-mini"
-CONTEXT_MODELS = {GROQ_MODEL, OPENAI_MODEL}
-OUTPUT_DIRECTORY = Path("data/processed/contextual_dense_v1")
-RECORDS_DIRECTORY = OUTPUT_DIRECTORY / "records"
-MANIFEST_PATH = OUTPUT_DIRECTORY / "manifest.json"
-COMPACT_CHUNKS_PATH = OUTPUT_DIRECTORY / "chunks.jsonl"
-MIN_CONTEXT_TOKENS = 50
-MAX_CONTEXT_TOKENS = 120
-MAX_ATTEMPTS = 5
-PROMPT = """You create retrieval-only context for one chunk from a manufacturer PDF.
+PROMPT_TEMPLATE = """You create retrieval-only context for one chunk from a manufacturer PDF.
 Using only the supplied document, write 50-100 tokens that identify what this chunk
 is about and where it belongs in the document. Do not add facts, advice, or claims
 that are absent from the document. The context is synthetic retrieval metadata, not
 manufacturer evidence. Return JSON with one field named context."""
-PROMPT_HASH = hashlib.sha256(PROMPT.encode("utf-8")).hexdigest()
+
+
+def context_prompt() -> str:
+    settings = get_params().contextualization
+    return PROMPT_TEMPLATE.replace(
+        "50-100", f"{settings.requested_min_tokens}-{settings.requested_max_tokens}"
+    )
+
+
+def prompt_hash() -> str:
+    return hashlib.sha256(context_prompt().encode("utf-8")).hexdigest()
+
+
+def context_models() -> set[str]:
+    settings = get_params().contextualization
+    return {settings.groq_model, settings.openai_model}
 
 
 class ContextResponse(BaseModel):
@@ -79,26 +87,28 @@ def approximate_token_count(text: str) -> int:
 
 
 def record_path(document_hash: str) -> Path:
-    return RECORDS_DIRECTORY / f"{document_hash}.jsonl"
+    return config_path("contextual_records") / f"{document_hash}.jsonl"
 
 
 def read_latest_records() -> dict[str, dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
-    if not RECORDS_DIRECTORY.exists():
+    if not config_path("contextual_records").exists():
         return latest
-    for path in sorted(RECORDS_DIRECTORY.glob("*.jsonl")):
+    for path in sorted(config_path("contextual_records").glob("*.jsonl")):
         lines = path.read_text(encoding="utf-8").splitlines()
         for line_number, line in enumerate(lines, 1):
             try:
                 record = json.loads(line)
             except json.JSONDecodeError as error:
-                raise ValueError(f"Invalid JSON in {path}:{line_number}: {error}") from error
+                raise ValueError(
+                    f"Invalid JSON in {path}:{line_number}: {error}"
+                ) from error
             latest[record["chunk_id"]] = record
     return latest
 
 
 def append_record(record: dict[str, Any]) -> None:
-    RECORDS_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    config_path("contextual_records").mkdir(parents=True, exist_ok=True)
     path = record_path(record["document_sha256"])
     with path.open("a", encoding="utf-8", newline="\n") as output:
         output.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
@@ -126,17 +136,17 @@ def inventory() -> tuple[list[DocumentWork], dict[str, str]]:
 def valid_success(record: dict[str, Any], chunk: Document) -> bool:
     return (
         record.get("status") == "complete"
-        and record.get("prompt_sha256") == PROMPT_HASH
-        and record.get("model") in CONTEXT_MODELS
+        and record.get("prompt_sha256") == prompt_hash()
+        and record.get("model") in context_models()
         and record.get("document_sha256") == chunk.metadata["document_sha256"]
         and record.get("source_filename") == chunk.metadata["source_filename"]
         and record.get("page_number") == chunk.metadata["page_number"]
         and record.get("start_index") == chunk.metadata.get("start_index", 0)
         and record.get("original_text_sha256")
         == hashlib.sha256(chunk.page_content.encode("utf-8")).hexdigest()
-        and MIN_CONTEXT_TOKENS
+        and get_params().contextualization.min_context_tokens
         <= approximate_token_count(record.get("generated_context", ""))
-        <= MAX_CONTEXT_TOKENS
+        <= get_params().contextualization.max_context_tokens
     )
 
 
@@ -146,9 +156,7 @@ def build_manifest(
     source_hashes: dict[str, str],
 ) -> dict[str, Any]:
     expected = {
-        stable_chunk_id(chunk): chunk
-        for item in items
-        for chunk in item.chunks
+        stable_chunk_id(chunk): chunk for item in items for chunk in item.chunks
     }
     counts = Counter(
         "complete" if valid_success(latest.get(identifier, {}), chunk) else "unresolved"
@@ -157,16 +165,19 @@ def build_manifest(
     complete = counts["unresolved"] == 0 and len(latest) == len(expected)
     return {
         "schema_version": 1,
-        "knowledge_base_version": KB_VERSION,
+        "knowledge_base_version": get_params().contextualization.knowledge_base_version,
         "completion_state": "complete" if complete else "partial",
         "updated_at_utc": datetime.now(UTC).isoformat(),
         "source_hashes": source_hashes,
-        "chunk_settings": {"size": CHUNK_SIZE, "overlap": CHUNK_OVERLAP},
+        "chunk_settings": {
+            "size": get_params().chunking.size,
+            "overlap": get_params().chunking.overlap,
+        },
         "context_settings": {
-            "models": sorted(CONTEXT_MODELS),
-            "prompt_sha256": PROMPT_HASH,
-            "min_approx_tokens": MIN_CONTEXT_TOKENS,
-            "max_approx_tokens": MAX_CONTEXT_TOKENS,
+            "models": sorted(context_models()),
+            "prompt_sha256": prompt_hash(),
+            "min_approx_tokens": get_params().contextualization.min_context_tokens,
+            "max_approx_tokens": get_params().contextualization.max_context_tokens,
         },
         "counts": {
             "documents": len(items),
@@ -178,12 +189,12 @@ def build_manifest(
 
 
 def write_manifest(manifest: dict[str, Any]) -> None:
-    OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    temporary = MANIFEST_PATH.with_suffix(".tmp")
+    config_path("contextual_artifacts").mkdir(parents=True, exist_ok=True)
+    temporary = config_path("contextual_manifest").with_suffix(".tmp")
     temporary.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    temporary.replace(MANIFEST_PATH)
+    temporary.replace(config_path("contextual_manifest"))
 
 
 def write_compact_chunks(
@@ -192,39 +203,34 @@ def write_compact_chunks(
     """Write one current successful record per chunk after full completion."""
 
     records = [
-        latest[stable_chunk_id(chunk)]
-        for item in items
-        for chunk in item.chunks
+        latest[stable_chunk_id(chunk)] for item in items for chunk in item.chunks
     ]
-    temporary = COMPACT_CHUNKS_PATH.with_suffix(".tmp")
+    temporary = config_path("contextual_chunks").with_suffix(".tmp")
     with temporary.open("w", encoding="utf-8", newline="\n") as output:
         for record in records:
             output.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
-    temporary.replace(COMPACT_CHUNKS_PATH)
+    temporary.replace(config_path("contextual_chunks"))
 
 
 def generator(provider: str) -> tuple[Any, str]:
+    settings = get_params().contextualization
+    model_name = settings.groq_model if provider == "groq" else settings.openai_model
+    kwargs = {
+        "model": model_name,
+        "max_tokens": settings.max_tokens,
+        "timeout": settings.timeout_seconds,
+        "max_retries": settings.max_retries,
+        "reasoning_effort": settings.reasoning_effort,
+    }
     if provider == "groq":
-        model_name = GROQ_MODEL
-        model = ChatGroq(
-            model=model_name,
-            temperature=0,
-            max_tokens=300,
-            timeout=60,
-            max_retries=0,
-            reasoning_effort="low",
-        )
+        model = ChatGroq(temperature=settings.groq_temperature, **kwargs)
     else:
-        model_name = OPENAI_MODEL
-        model = ChatOpenAI(
-            model=model_name,
-            max_tokens=300,
-            timeout=60,
-            max_retries=0,
-            reasoning_effort="low",
-        )
-    chain = model.with_structured_output(ContextResponse, method="json_schema")
-    return chain, model_name
+        if settings.openai_temperature is not None:
+            kwargs["temperature"] = settings.openai_temperature
+        model = ChatOpenAI(**kwargs)
+    return model.with_structured_output(
+        ContextResponse, method="json_schema"
+    ), model_name
 
 
 def retry_delay_seconds(error: Exception, attempt: int) -> float:
@@ -232,8 +238,11 @@ def retry_delay_seconds(error: Exception, attempt: int) -> float:
 
     match = re.search(r"try again in ([0-9.]+)s", str(error), flags=re.IGNORECASE)
     if match:
-        return float(match.group(1)) + 1
-    return 2 ** (attempt - 1)
+        return (
+            float(match.group(1))
+            + get_params().contextualization.retry_wait_margin_seconds
+        )
+    return get_params().contextualization.retry_backoff_base ** (attempt - 1)
 
 
 def quota_is_exhausted(error: Exception, provider: str) -> bool:
@@ -257,14 +266,14 @@ def generate_context(
         [
             # Keep the stable instructions and full document before the varying
             # chunk so providers can reuse the repeated prompt prefix.
-            ("system", PROMPT),
+            ("system", context_prompt()),
             ("human", "<document>\n{document}\n</document>"),
             ("human", "<chunk>\n{chunk}\n</chunk>\n{length_feedback}"),
         ]
     )
     last_error: Exception | None = None
     length_feedback = ""
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    for attempt in range(1, get_params().contextualization.max_attempts + 1):
         try:
             response = chain.invoke(
                 prompt.invoke(
@@ -277,14 +286,18 @@ def generate_context(
             )
             context = response.context.strip()
             count = approximate_token_count(context)
-            if not MIN_CONTEXT_TOKENS <= count <= MAX_CONTEXT_TOKENS:
+            if (
+                not get_params().contextualization.min_context_tokens
+                <= count
+                <= get_params().contextualization.max_context_tokens
+            ):
                 length_feedback = (
                     f"Your previous response was {count} approximate tokens. "
-                    f"Revise it to {MIN_CONTEXT_TOKENS}-{MAX_CONTEXT_TOKENS} tokens."
+                    f"Revise it to {get_params().contextualization.min_context_tokens}-{get_params().contextualization.max_context_tokens} tokens."
                 )
                 raise ValueError(
                     f"Context has {count} approximate tokens; expected "
-                    f"{MIN_CONTEXT_TOKENS}-{MAX_CONTEXT_TOKENS}."
+                    f"{get_params().contextualization.min_context_tokens}-{get_params().contextualization.max_context_tokens}."
                 )
             return context, attempt
         except Exception as error:
@@ -293,14 +306,14 @@ def generate_context(
                 raise GroqRequestTooLargeError(str(error)) from error
             if quota_is_exhausted(error, provider):
                 raise ProviderQuotaError(str(error)) from error
-            if attempt < MAX_ATTEMPTS:
+            if attempt < get_params().contextualization.max_attempts:
                 time.sleep(retry_delay_seconds(error, attempt))
-    raise RuntimeError(f"Context generation failed after {MAX_ATTEMPTS} attempts: {last_error}")
+    raise RuntimeError(
+        f"Context generation failed after {get_params().contextualization.max_attempts} attempts: {last_error}"
+    )
 
 
-def base_record(
-    chunk: Document, model_name: str, provider: str
-) -> dict[str, Any]:
+def base_record(chunk: Document, model_name: str, provider: str) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "chunk_id": stable_chunk_id(chunk),
@@ -310,30 +323,33 @@ def base_record(
         "page_number": chunk.metadata["page_number"],
         "start_index": chunk.metadata.get("start_index", 0),
         "original_text": chunk.page_content,
-        "original_text_sha256": hashlib.sha256(chunk.page_content.encode("utf-8")).hexdigest(),
+        "original_text_sha256": hashlib.sha256(
+            chunk.page_content.encode("utf-8")
+        ).hexdigest(),
         "model": model_name,
         "provider": provider,
-        "prompt_sha256": PROMPT_HASH,
+        "prompt_sha256": prompt_hash(),
         "generated_at_utc": datetime.now(UTC).isoformat(),
     }
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate contextual dense-retrieval records.")
-    parser.add_argument("--dry-run", action="store_true", help="Validate and count without API calls or writes.")
-    parser.add_argument("--document", help="Generate only the exact source PDF filename.")
+    parser = argparse.ArgumentParser(
+        description="Generate contextual dense-retrieval records."
+    )
+    add_params_argument(parser)
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Validate without API calls or writes."
+    )
     parser.add_argument(
         "--confirm-paid-calls",
         action="store_true",
-        help="Required acknowledgement before hosted context generation begins.",
+        help="Acknowledge hosted generation costs.",
     )
-    parser.add_argument(
-        "--provider",
-        choices=("groq", "openai", "auto"),
-        default="groq",
-        help="Hosted provider; auto starts with Groq and falls back to OpenAI.",
-    )
-    return parser.parse_args()
+    args = parser.parse_args()
+    settings = load_params(args.params).contextualization
+    args.document, args.provider = settings.document, settings.provider
+    return args
 
 
 def main() -> None:
@@ -341,8 +357,12 @@ def main() -> None:
     items, source_hashes = inventory()
     latest = read_latest_records()
     manifest = build_manifest(items, latest, source_hashes)
-    print(f"Validated {manifest['counts']['documents']} documents and {manifest['counts']['chunks']} chunks.")
-    print(f"Completed: {manifest['counts']['completed']}; unresolved: {manifest['counts']['unresolved']}.")
+    print(
+        f"Validated {manifest['counts']['documents']} documents and {manifest['counts']['chunks']} chunks."
+    )
+    print(
+        f"Completed: {manifest['counts']['completed']}; unresolved: {manifest['counts']['unresolved']}."
+    )
     if args.dry_run:
         return
     if not args.confirm_paid_calls:
@@ -359,10 +379,7 @@ def main() -> None:
     truststore.inject_into_ssl()
     load_dotenv()
     provider_names = ("groq", "openai") if args.provider == "auto" else (args.provider,)
-    generators = {
-        provider: generator(provider)
-        for provider in provider_names
-    }
+    generators = {provider: generator(provider) for provider in provider_names}
     active_provider = provider_names[0]
     for item in selected:
         document_text = render_full_document(item.pages)
@@ -428,7 +445,7 @@ def main() -> None:
                     status="failed",
                     generated_context=None,
                     context_approx_tokens=0,
-                    attempts=MAX_ATTEMPTS,
+                    attempts=get_params().contextualization.max_attempts,
                     error=str(error),
                 )
             append_record(record)

@@ -1,9 +1,7 @@
 import argparse
 import hashlib
 import json
-import os
 import uuid
-from pathlib import Path
 from typing import TypedDict
 
 import truststore
@@ -19,67 +17,43 @@ from langgraph.graph import END, START, StateGraph
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
-from src.app.contextual_bm25 import (
-    DEFAULT_B as BM25_B,
-)
-from src.app.contextual_bm25 import (
-    DEFAULT_K1 as BM25_K1,
-)
-from src.app.contextual_bm25 import (
-    ContextualBM25Retriever,
-)
+from src.app.contextual_bm25 import ContextualBM25Retriever
 from src.app.evidence import render_retrieval_context
 from src.app.prompt_registry import fetch_baseline_prompt
-from src.data.contextualize_documents import (
-    MANIFEST_PATH as CONTEXTUAL_MANIFEST_PATH,
+from src.config import (
+    add_params_argument,
+    get_params,
+    load_params,
 )
+from src.config import path as config_path
 from src.data.contextualize_documents import (
-    PROMPT_HASH,
+    prompt_hash,
     read_latest_records,
     valid_success,
 )
 from src.data.corpus import (
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
     load_document_chunks,
     stable_chunk_id,
 )
 
-VECTOR_STORE_DIRECTORY = Path("data/vector_store/qdrant")
-BASELINE_COLLECTION_NAME = "coating-compass-baseline-v1"
-CONTEXTUAL_COLLECTION_NAME = "coating-compass-contextual-dense-v1"
-CONTEXTUAL_BM25_NAME = "coating-compass-contextual-bm25-v2"
 RETRIEVAL_MODES = (
     "auto",
     "baseline-dense",
     "contextual-dense",
     "contextual-bm25",
 )
-DENSE_COLLECTIONS = {
-    "baseline-dense": BASELINE_COLLECTION_NAME,
-    "contextual-dense": CONTEXTUAL_COLLECTION_NAME,
-}
 
 
 def contextual_artifact_declares_complete() -> bool:
-    if not CONTEXTUAL_MANIFEST_PATH.is_file():
+    if not config_path("contextual_manifest").is_file():
         return False
     try:
-        manifest = json.loads(CONTEXTUAL_MANIFEST_PATH.read_text(encoding="utf-8"))
+        manifest = json.loads(
+            config_path("contextual_manifest").read_text(encoding="utf-8")
+        )
     except (OSError, json.JSONDecodeError):
         return False
     return manifest.get("completion_state") == "complete"
-
-
-COLLECTION_NAME = (
-    CONTEXTUAL_COLLECTION_NAME
-    if contextual_artifact_declares_complete()
-    else BASELINE_COLLECTION_NAME
-)
-EMBEDDING_DIMENSIONS = 1_536
-
-RETRIEVAL_K = 5
-DEFAULT_GENERATOR_MAX_TOKENS = 2_000
 
 
 class RAGState(TypedDict):
@@ -90,14 +64,12 @@ class RAGState(TypedDict):
 
 def load_and_split_documents() -> list[Document]:
     chunks = load_document_chunks()
-    pdf_limit = int(os.getenv("COATING_COMPASS_PDF_LIMIT", "0"))
-    if pdf_limit > 0:
+    pdf_limit = get_params().chunking.pdf_limit
+    if pdf_limit is not None:
         filenames = sorted({chunk.metadata["source_filename"] for chunk in chunks})
         allowed = set(filenames[:pdf_limit])
         chunks = [
-            chunk
-            for chunk in chunks
-            if chunk.metadata["source_filename"] in allowed
+            chunk for chunk in chunks if chunk.metadata["source_filename"] in allowed
         ]
     return chunks
 
@@ -110,8 +82,8 @@ def chunk_id(document: Document, embedding_model: str) -> str:
             document.metadata["document_sha256"],
             str(document.metadata["page_number"]),
             str(document.metadata.get("start_index", 0)),
-            str(CHUNK_SIZE),
-            str(CHUNK_OVERLAP),
+            str(get_params().chunking.size),
+            str(get_params().chunking.overlap),
             embedding_model,
             document.page_content,
         ]
@@ -127,41 +99,8 @@ def contextual_retrieval_text(generated_context: str, original_text: str) -> str
 
 
 def generator_model_config() -> dict:
-    """Return validated, reproducible settings for the hosted answer model."""
-
-    provider = os.getenv("COATING_COMPASS_GENERATOR_PROVIDER", "groq").lower()
-    if provider not in {"groq", "openai"}:
-        raise ValueError(
-            "COATING_COMPASS_GENERATOR_PROVIDER must be 'groq' or 'openai'."
-        )
-    default_model = (
-        os.getenv("COATING_COMPASS_GROQ_MODEL", "openai/gpt-oss-20b")
-        if provider == "groq"
-        else "gpt-5-mini-2025-08-07"
-    )
-    model = os.getenv("COATING_COMPASS_GENERATOR_MODEL", default_model)
-    max_tokens = int(
-        os.getenv(
-            "COATING_COMPASS_GENERATOR_MAX_TOKENS",
-            str(DEFAULT_GENERATOR_MAX_TOKENS),
-        )
-    )
-    if max_tokens < 1:
-        raise ValueError("COATING_COMPASS_GENERATOR_MAX_TOKENS must be positive.")
-
-    config = {
-        "provider": provider,
-        "model": model,
-        "temperature": 0,
-        "max_tokens": max_tokens,
-        "timeout": 30,
-        "max_retries": 2,
-    }
-    if model.startswith(("openai/gpt-oss-", "gpt-5")):
-        config["reasoning_effort"] = os.getenv(
-            "COATING_COMPASS_GENERATOR_REASONING_EFFORT", "low"
-        )
-    return config
+    settings = get_params().generator
+    return {"provider": settings.provider, **settings.model_kwargs()}
 
 
 def create_generator_model():
@@ -177,15 +116,31 @@ def create_generator_model():
 def load_complete_contextual_documents() -> list[tuple[str, Document, str]]:
     """Validate every contextual record before allowing any contextual indexing."""
 
-    if not CONTEXTUAL_MANIFEST_PATH.is_file():
+    if not config_path("contextual_manifest").is_file():
         raise ValueError(
             "Contextual artifacts are missing. Run "
             "`python -m src.data.contextualize_documents --dry-run` first."
         )
-    manifest = json.loads(CONTEXTUAL_MANIFEST_PATH.read_text(encoding="utf-8"))
+    manifest = json.loads(
+        config_path("contextual_manifest").read_text(encoding="utf-8")
+    )
     if manifest.get("completion_state") != "complete":
-        raise ValueError("Contextual artifact manifest is not complete; refusing to index.")
-    if manifest.get("context_settings", {}).get("prompt_sha256") != PROMPT_HASH:
+        raise ValueError(
+            "Contextual artifact manifest is not complete; refusing to index."
+        )
+    if (
+        manifest.get("knowledge_base_version")
+        != get_params().contextualization.knowledge_base_version
+    ):
+        raise ValueError(
+            "Contextual knowledge-base version differs from configuration."
+        )
+    if manifest.get("chunk_settings") != {
+        "size": get_params().chunking.size,
+        "overlap": get_params().chunking.overlap,
+    }:
+        raise ValueError("Contextual chunk settings differ from configuration.")
+    if manifest.get("context_settings", {}).get("prompt_sha256") != prompt_hash():
         raise ValueError("Contextual artifact prompt hash is stale; refusing to index.")
 
     chunks = load_and_split_documents()
@@ -194,7 +149,9 @@ def load_complete_contextual_documents() -> list[tuple[str, Document, str]]:
         for chunk in chunks
     }
     if manifest.get("source_hashes") != current_source_hashes:
-        raise ValueError("Contextual manifest source hashes are stale; refusing to index.")
+        raise ValueError(
+            "Contextual manifest source hashes are stale; refusing to index."
+        )
     expected_counts = manifest.get("counts", {})
     document_count_changed = expected_counts.get("documents") != len(
         current_source_hashes
@@ -205,14 +162,18 @@ def load_complete_contextual_documents() -> list[tuple[str, Document, str]]:
     latest = read_latest_records()
     expected_ids = {stable_chunk_id(chunk) for chunk in chunks}
     if set(latest) != expected_ids:
-        raise ValueError("Contextual records do not exactly match current source chunks.")
+        raise ValueError(
+            "Contextual records do not exactly match current source chunks."
+        )
 
     contextual_documents = []
     for chunk in chunks:
         identifier = stable_chunk_id(chunk)
         record = latest[identifier]
         if not valid_success(record, chunk):
-            raise ValueError(f"Missing, invalid, or stale contextual record: {identifier}")
+            raise ValueError(
+                f"Missing, invalid, or stale contextual record: {identifier}"
+            )
         metadata = {
             **chunk.metadata,
             "chunk_id": identifier,
@@ -235,25 +196,95 @@ def build_contextual_bm25_retriever() -> Runnable[str, list[Document]]:
     # The loader returns (stable ID, original Document, context + original text).
     # BM25 indexes the last item but returns the original Document as evidence.
     return ContextualBM25Retriever(
-        load_complete_contextual_documents(), k=RETRIEVAL_K
+        load_complete_contextual_documents(), k=get_params().retrieval.k
     )
 
 
 def create_qdrant_store(
-    client: QdrantClient, collection_name: str, embeddings: Embeddings
+    client: QdrantClient,
+    collection_name: str,
+    embeddings: Embeddings,
+    *,
+    contextual_inputs_sha256: str | None = None,
 ) -> QdrantVectorStore:
+    settings = get_params()
+    identity = {
+        "embedding_model": settings.embeddings.model,
+        "dimensions": settings.embeddings.dimensions,
+        "distance": settings.retrieval.distance,
+        "chunking": settings.chunking.model_dump(mode="json"),
+    }
     if not client.collection_exists(collection_name):
         client.create_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(
-                size=EMBEDDING_DIMENSIONS,
-                distance=Distance.COSINE,
+                size=get_params().embeddings.dimensions,
+                distance=Distance(get_params().retrieval.distance),
             ),
+            metadata={"coating_compass_index": identity},
         )
+    info = client.get_collection(collection_name)
+    vectors = info.config.params.vectors
+    if (
+        vectors.size != get_params().embeddings.dimensions
+        or vectors.distance != Distance(get_params().retrieval.distance)
+    ):
+        raise ValueError(
+            "Existing collection dimensions/distance do not match configured embeddings."
+        )
+    recorded = (info.config.metadata or {}).get("coating_compass_index")
+    if recorded is None and info.points_count:
+        # Immutable identity of the two indexes built before YAML configuration.
+        # These are migration facts, not fallback run settings.
+        legacy = {
+            "embedding_model": "text-embedding-3-small",
+            "dimensions": 1536,
+            "distance": "Cosine",
+            "chunking": {
+                "size": 1000,
+                "overlap": 150,
+                "separators": ["\n\n", "\n", ". ", " ", ""],
+                "pdf_limit": None,
+            },
+        }
+        if (
+            collection_name
+            not in {
+                "coating-compass-baseline-v1",
+                "coating-compass-contextual-dense-v1",
+            }
+            or identity != legacy
+        ):
+            raise ValueError(
+                "Unversioned existing index cannot be reused with these settings. Choose a new collection name."
+            )
+    elif recorded is not None and recorded != identity:
+        raise ValueError(
+            "Index model/chunking configuration changed. Choose a new collection name."
+        )
+    if recorded is None:
+        client.update_collection(
+            collection_name, metadata={"coating_compass_index": identity}
+        )
+    if contextual_inputs_sha256 is not None:
+        recorded_inputs = (info.config.metadata or {}).get("contextual_inputs_sha256")
+        if recorded_inputs is not None and recorded_inputs != contextual_inputs_sha256:
+            raise ValueError(
+                "Contextual embedding inputs changed. Choose a new collection name."
+            )
+        if recorded_inputs is None:
+            client.update_collection(
+                collection_name,
+                metadata={"contextual_inputs_sha256": contextual_inputs_sha256},
+            )
     return QdrantVectorStore(
         client=client,
         collection_name=collection_name,
         embedding=embeddings,
+        distance=Distance(settings.retrieval.distance),
+        # Dimensions and distance were checked locally above; avoid LangChain's
+        # hosted dummy embedding request when validating an existing collection.
+        validate_collection_config=False,
     )
 
 
@@ -261,12 +292,12 @@ def build_baseline_vector_store(
     client: QdrantClient, embeddings: Embeddings, embedding_model: str
 ) -> QdrantVectorStore:
     vector_store = create_qdrant_store(
-        client, BASELINE_COLLECTION_NAME, embeddings
+        client, get_params().retrieval.baseline_collection, embeddings
     )
     chunks = load_and_split_documents()
     identifiers = [chunk_id(chunk, embedding_model) for chunk in chunks]
     existing_points = client.retrieve(
-        collection_name=BASELINE_COLLECTION_NAME,
+        collection_name=get_params().retrieval.baseline_collection,
         ids=identifiers,
         with_payload=False,
         with_vectors=False,
@@ -293,11 +324,20 @@ def build_contextual_vector_store(
 ) -> QdrantVectorStore:
     contextual_documents = load_complete_contextual_documents()
     vector_store = create_qdrant_store(
-        client, CONTEXTUAL_COLLECTION_NAME, embeddings
+        client,
+        get_params().retrieval.contextual_collection,
+        embeddings,
+        contextual_inputs_sha256=hashlib.sha256(
+            json.dumps(
+                [(identifier, text) for identifier, _, text in contextual_documents],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest(),
     )
     chunk_ids = [item[0] for item in contextual_documents]
     existing_points = client.retrieve(
-        collection_name=CONTEXTUAL_COLLECTION_NAME,
+        collection_name=get_params().retrieval.contextual_collection,
         ids=chunk_ids,
         with_payload=False,
         with_vectors=False,
@@ -306,11 +346,15 @@ def build_contextual_vector_store(
     missing = [item for item in contextual_documents if item[0] not in existing_ids]
     if missing:
         print(f"Embedding {len(missing)} new contextual chunks...")
-        for offset in range(0, len(missing), 64):
-            batch = missing[offset : offset + 64]
+        for offset in range(
+            0, len(missing), get_params().embeddings.contextual_batch_size
+        ):
+            batch = missing[
+                offset : offset + get_params().embeddings.contextual_batch_size
+            ]
             vectors = embeddings.embed_documents([item[2] for item in batch])
             client.upsert(
-                collection_name=CONTEXTUAL_COLLECTION_NAME,
+                collection_name=get_params().retrieval.contextual_collection,
                 points=[
                     PointStruct(
                         id=identifier,
@@ -331,6 +375,9 @@ def build_contextual_vector_store(
 
 
 def resolve_retrieval_mode(retrieval_mode: str) -> str:
+    retrieval_mode = (
+        get_params().retrieval.mode if retrieval_mode is None else retrieval_mode
+    )
     if retrieval_mode not in RETRIEVAL_MODES:
         raise ValueError(
             f"retrieval mode must be one of: {', '.join(RETRIEVAL_MODES)}."
@@ -344,11 +391,20 @@ def resolve_retrieval_mode(retrieval_mode: str) -> str:
     return retrieval_mode
 
 
+def dense_collection(mode: str) -> str:
+    settings = get_params().retrieval
+    return (
+        settings.contextual_collection
+        if mode == "contextual-dense"
+        else settings.baseline_collection
+    )
+
+
 def retrieval_name(retrieval_mode: str) -> str:
     resolved = resolve_retrieval_mode(retrieval_mode)
     if resolved == "contextual-bm25":
-        return CONTEXTUAL_BM25_NAME
-    return DENSE_COLLECTIONS[resolved]
+        return get_params().retrieval.bm25_name
+    return dense_collection(resolved)
 
 
 def retrieval_metadata(retrieval_mode: str) -> dict:
@@ -356,34 +412,40 @@ def retrieval_metadata(retrieval_mode: str) -> dict:
     is_bm25 = resolved == "contextual-bm25"
     return {
         "retrieval_mode": resolved,
-        "retrieval_k": RETRIEVAL_K,
+        "retrieval_k": get_params().retrieval.k,
         # BM25 is rebuilt in memory; only dense modes have Qdrant collections.
-        "collection": None if is_bm25 else DENSE_COLLECTIONS[resolved],
-        "bm25_k1": BM25_K1 if is_bm25 else None,
-        "bm25_b": BM25_B if is_bm25 else None,
+        "collection": None if is_bm25 else dense_collection(resolved),
+        "bm25_k1": get_params().retrieval.bm25_k1 if is_bm25 else None,
+        "bm25_b": get_params().retrieval.bm25_b if is_bm25 else None,
         "bm25_implementation": "langchain-bm25okapi-v2" if is_bm25 else None,
     }
 
 
-def build_vector_store(retrieval_mode: str = "auto") -> QdrantVectorStore:
+def build_vector_store(retrieval_mode: str | None = None) -> QdrantVectorStore:
     resolved = resolve_retrieval_mode(retrieval_mode)
     if resolved == "contextual-bm25":
         raise ValueError("contextual-bm25 does not use a vector store.")
-    embedding_model = os.getenv(
-        "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
-    )
+    settings = get_params().embeddings
+    embedding_model = settings.model
     embeddings = OpenAIEmbeddings(
-        model=embedding_model, check_embedding_ctx_length=False,
-        request_timeout=60, max_retries=2,
+        model=embedding_model,
+        check_embedding_ctx_length=False,
+        request_timeout=settings.timeout_seconds,
+        max_retries=settings.max_retries,
+        dimensions=settings.dimensions,
     )
-    VECTOR_STORE_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    client = QdrantClient(path=str(VECTOR_STORE_DIRECTORY))
-    if resolved == "contextual-dense":
-        return build_contextual_vector_store(client, embeddings)
-    return build_baseline_vector_store(client, embeddings, embedding_model)
+    config_path("vector_store").mkdir(parents=True, exist_ok=True)
+    client = QdrantClient(path=str(config_path("vector_store")))
+    try:
+        if resolved == "contextual-dense":
+            return build_contextual_vector_store(client, embeddings)
+        return build_baseline_vector_store(client, embeddings, embedding_model)
+    except Exception:
+        client.close()
+        raise
 
 
-def build_retriever(retrieval_mode: str = "auto"):
+def build_retriever(retrieval_mode: str | None = None):
     """Return one object with the simple ``invoke(question)`` interface."""
 
     resolved = resolve_retrieval_mode(retrieval_mode)
@@ -392,8 +454,8 @@ def build_retriever(retrieval_mode: str = "auto"):
 
     # LangChain already provides the same invoke interface for Qdrant.
     return build_vector_store(resolved).as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": RETRIEVAL_K},
+        search_type=get_params().retrieval.search_type,
+        search_kwargs={"k": get_params().retrieval.k},
     )
 
 
@@ -411,8 +473,10 @@ def create_rag_graph(retriever, system_prompt: str, *, rate_limiter=None):
             ),
             (
                 "human",
-                ("Question:\n{question}\n\nRetrieved evidence:\n{context}\n\n"
-                 "Return an answer, important limitations, and sources."),
+                (
+                    "Question:\n{question}\n\nRetrieved evidence:\n{context}\n\n"
+                    "Return an answer, important limitations, and sources."
+                ),
             ),
         ]
     )
@@ -446,17 +510,15 @@ def create_rag_graph(retriever, system_prompt: str, *, rate_limiter=None):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Coating Compass RAG app.")
-    parser.add_argument(
-        "--retrieval-mode",
-        choices=RETRIEVAL_MODES,
-        default="auto",
-        help="Retrieval architecture (default: auto).",
-    )
+    add_params_argument(parser)
+    parser.add_argument("--ingest-only", action="store_true")
     args = parser.parse_args()
+    settings = load_params(args.params)
+    args.retrieval_mode = settings.retrieval.mode
     truststore.inject_into_ssl()
     load_dotenv()
     retriever = build_retriever(args.retrieval_mode)
-    if os.getenv("COATING_COMPASS_INGEST_ONLY") == "1":
+    if args.ingest_only:
         print("Ingest-only run complete.")
         return
     prompt_version = fetch_baseline_prompt()

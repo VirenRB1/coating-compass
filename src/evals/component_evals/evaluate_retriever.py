@@ -1,9 +1,7 @@
 import argparse
 import hashlib
 import json
-import os
 from datetime import UTC, datetime
-from pathlib import Path
 
 import truststore
 from deepeval import evaluate
@@ -17,16 +15,19 @@ from deepeval.test_case import LLMTestCase
 from dotenv import load_dotenv
 
 from src.app.basic_rag import (
-    RETRIEVAL_K,
-    RETRIEVAL_MODES,
     build_retriever,
     retrieval_metadata,
 )
 from src.app.evidence import render_retrieval_context
+from src.config import (
+    add_params_argument,
+    config_snapshot,
+    get_params,
+    load_params,
+    select_cases,
+)
+from src.config import path as config_path
 
-GOLDENS_PATH = Path("data/evaluations/manual_golden_dataset.json")
-RESULTS_DIRECTORY = Path("data/evaluations/results")
-REPORT_PATH = Path("data/evaluations/retriever_evaluation_report.md")
 METRIC_NAMES = [
     "Contextual Recall",
     "Contextual Precision",
@@ -35,41 +36,22 @@ METRIC_NAMES = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Evaluate the baseline retriever.")
-    parser.add_argument("--label", default="baseline")
-    parser.add_argument(
-        "--retrieval-mode", choices=RETRIEVAL_MODES, default="auto"
+    parser = argparse.ArgumentParser(description="Evaluate the configured component.")
+    add_params_argument(parser)
+    parser.add_argument("--label", help="Run label.")
+    args = parser.parse_args()
+    settings = load_params(args.params)
+    args.label = args.label or settings.evaluation.component_label
+    args.retrieval_mode, args.case_id = (
+        settings.retrieval.mode,
+        settings.evaluation.case_ids,
     )
-    parser.add_argument(
-        "--case-id",
-        action="append",
-        help="Evaluate only this manual_NNN case ID. Repeat to select more than one.",
-    )
-    return parser.parse_args()
-
-
-def select_goldens(
-    goldens: list[dict], case_ids: list[str] | None
-) -> list[tuple[int, dict]]:
-    indexed_goldens = list(enumerate(goldens, start=1))
-    selected_ids = set(case_ids or [])
-    if not selected_ids:
-        return indexed_goldens
-
-    selected = [
-        (index, golden)
-        for index, golden in indexed_goldens
-        if f"manual_{index:03d}" in selected_ids
-    ]
-    found_ids = {f"manual_{index:03d}" for index, _ in selected}
-    if missing_ids := selected_ids - found_ids:
-        raise ValueError(f"Unknown case IDs: {sorted(missing_ids)}")
-    return selected
+    return args
 
 
 def write_markdown_report() -> None:
     runs = []
-    for path in RESULTS_DIRECTORY.glob("retriever_*.json"):
+    for path in config_path("evaluation_results").glob("retriever_*.json"):
         run = json.loads(path.read_text(encoding="utf-8"))
         if run.get("run", {}).get("status") == "complete":
             runs.append(run)
@@ -95,6 +77,7 @@ def write_markdown_report() -> None:
                 f"- Embedding model: `{metadata['embedding_model']}`",
                 f"- Evaluation model: `{metadata['evaluation_model']}`",
                 f"- Golden dataset SHA-256: `{metadata['goldens_sha256']}`",
+                f"- Parameters SHA-256: `{metadata.get('params_sha256', 'not recorded (historical run)')}`",
                 "",
                 "| Metric | Average | Passed |",
                 "|---|---:|---:|",
@@ -138,15 +121,18 @@ def write_markdown_report() -> None:
             f"{len(run['cases'])} |"
         )
 
-    REPORT_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    config_path("retriever_report").parent.mkdir(parents=True, exist_ok=True)
+    config_path("retriever_report").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
 
 
 def main() -> None:
     args = parse_args()
     truststore.inject_into_ssl()
     load_dotenv()
-    goldens = json.loads(GOLDENS_PATH.read_text(encoding="utf-8"))
-    indexed_goldens = select_goldens(goldens, args.case_id)
+    goldens = json.loads(config_path("goldens").read_text(encoding="utf-8"))
+    indexed_goldens = select_cases(goldens)
     retriever = build_retriever(args.retrieval_mode)
     retrieval_config = retrieval_metadata(args.retrieval_mode)
 
@@ -164,17 +150,32 @@ def main() -> None:
             )
         )
 
-    model = os.getenv("COATING_COMPASS_EVALUATION_MODEL", "gpt-5-mini-2025-08-07")
+    model = get_params().evaluation.judge_model
     metrics = [
-        ContextualRecallMetric(model=model, async_mode=False),
-        ContextualPrecisionMetric(model=model, async_mode=False),
-        ContextualRelevancyMetric(model=model, async_mode=False),
+        ContextualRecallMetric(
+            model=model,
+            threshold=get_params().evaluation.thresholds.contextual_recall,
+            async_mode=False,
+        ),
+        ContextualPrecisionMetric(
+            model=model,
+            threshold=get_params().evaluation.thresholds.contextual_precision,
+            async_mode=False,
+        ),
+        ContextualRelevancyMetric(
+            model=model,
+            threshold=get_params().evaluation.thresholds.contextual_relevancy,
+            async_mode=False,
+        ),
     ]
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    RESULTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    output_path = RESULTS_DIRECTORY / f"retriever_{args.label}_{timestamp}.json"
+    config_path("evaluation_results").mkdir(parents=True, exist_ok=True)
+    output_path = (
+        config_path("evaluation_results") / f"retriever_{args.label}_{timestamp}.json"
+    )
     output = {
         "run": {
+            **config_snapshot(),
             "label": args.label,
             "timestamp_utc": timestamp,
             "status": "running",
@@ -182,12 +183,12 @@ def main() -> None:
             "embedding_model": (
                 None
                 if retrieval_config["retrieval_mode"] == "contextual-bm25"
-                else os.getenv(
-                    "COATING_COMPASS_EMBEDDING_MODEL", "text-embedding-3-small"
-                )
+                else get_params().embeddings.model
             ),
             "evaluation_model": model,
-            "goldens_sha256": hashlib.sha256(GOLDENS_PATH.read_bytes()).hexdigest(),
+            "goldens_sha256": hashlib.sha256(
+                config_path("goldens").read_bytes()
+            ).hexdigest(),
             "case_ids": [f"manual_{index:03d}" for index, _ in indexed_goldens],
         },
         "averages": {},
@@ -202,10 +203,13 @@ def main() -> None:
                 "architecture": args.label,
                 "embedding_model": output["run"]["embedding_model"],
                 "evaluation_model": model,
-                "retrieval_k": RETRIEVAL_K,
+                "retrieval_k": get_params().retrieval.k,
             },
             async_config=AsyncConfig(run_async=False),
-            cache_config=CacheConfig(write_cache=True, use_cache=True),
+            cache_config=CacheConfig(
+                write_cache=get_params().evaluation.retriever_write_cache,
+                use_cache=get_params().evaluation.retriever_use_cache,
+            ),
         )
         test_result = result.test_results[0]
         metric_results = {
@@ -247,8 +251,7 @@ def main() -> None:
     for name, average in output["averages"].items():
         passed = sum(case["metrics"][name]["success"] for case in output["cases"])
         print(
-            f"- {name}: average={average:.3f}, "
-            f"passed={passed}/{len(output['cases'])}"
+            f"- {name}: average={average:.3f}, passed={passed}/{len(output['cases'])}"
         )
     print(f"Saved retriever evaluation results to {output_path}")
 

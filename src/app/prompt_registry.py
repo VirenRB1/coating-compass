@@ -6,8 +6,12 @@ import truststore
 from dotenv import load_dotenv
 from langfuse import get_client
 
-PROMPT_NAME = "coating_compass_baseline_prompt"
-PROMPT_LABEL = "baseline"
+from src.config import (
+    add_params_argument,
+    get_params,
+    load_params,
+)
+
 REQUIRED_LANGFUSE_VARIABLES = (
     "LANGFUSE_PUBLIC_KEY",
     "LANGFUSE_SECRET_KEY",
@@ -37,6 +41,7 @@ def validate_langfuse_environment() -> None:
 def fetch_baseline_prompt(client: Any | None = None) -> PromptVersion:
     """Fetch the prompt currently selected by the immutable baseline label."""
 
+    get_params()
     load_dotenv()
     validate_langfuse_environment()
 
@@ -45,23 +50,32 @@ def fetch_baseline_prompt(client: Any | None = None) -> PromptVersion:
         client = get_client()
 
     prompt = client.get_prompt(
-        PROMPT_NAME,
-        label=PROMPT_LABEL,
+        get_params().prompt.name,
+        label=get_params().prompt.label,
         type="text",
     )
     if not isinstance(prompt.prompt, str) or not prompt.prompt.strip():
-        raise TypeError(f"Langfuse prompt {PROMPT_NAME!r} must be non-empty text.")
+        raise TypeError(
+            f"Langfuse prompt {get_params().prompt.name!r} must be non-empty text."
+        )
 
     return PromptVersion(
         name=prompt.name,
         version=prompt.version,
-        label=PROMPT_LABEL,
+        label=get_params().prompt.label,
         text=prompt.prompt,
         config=dict(prompt.config or {}),
     )
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Inspect the configured Langfuse prompt."
+    )
+    add_params_argument(parser)
+    load_params(parser.parse_args().params)
     prompt = fetch_baseline_prompt()
     print(f"Fetched prompt: {prompt.name}")
     print(f"Version: {prompt.version}")
