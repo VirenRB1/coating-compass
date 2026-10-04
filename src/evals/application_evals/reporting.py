@@ -63,6 +63,7 @@ def write_markdown_report(output_path: Path, result: dict[str, Any]) -> None:
         f"- Hybrid dense/BM25 candidates: `{run.get('hybrid_dense_k')}` / `{run.get('hybrid_bm25_k')}`",
         f"- Hybrid weights / RRF constant: `{run.get('hybrid_weights')}` / `{run.get('hybrid_rrf_c')}`",
         f"- Retrieval K: `{run['retrieval_k']}`",
+        f"- Reranking: `{run.get('reranking_implementation')}` / `{run.get('reranking_model')}`",
         f"- Embedding model: `{run['embedding_model']}`",
         f"- Generator provider: `{run.get('generator_provider', 'groq')}`",
         f"- Generator model: `{run['generator_model']}`",

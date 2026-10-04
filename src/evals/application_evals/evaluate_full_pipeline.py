@@ -157,6 +157,8 @@ def validate_resume_retrieval(
         "hybrid_bm25_k",
         "hybrid_weights",
         "hybrid_rrf_c",
+        "reranking_model",
+        "reranking_implementation",
     ):
         if run.get(setting) != retrieval_config[setting]:
             raise ValueError(f"Cannot resume: {setting} has changed.")
@@ -165,6 +167,13 @@ def validate_resume_retrieval(
 def close_retriever(retriever) -> None:
     """Close dense clients inside native retrievers or composed hybrid branches."""
 
+    base = getattr(retriever, "base_retriever", None)
+    if base is not None:
+        close_retriever(base)
+    compressor = getattr(retriever, "base_compressor", None)
+    reranking_client = getattr(compressor, "client", None)
+    if reranking_client is not None:
+        reranking_client.close()
     for child in getattr(retriever, "steps", []) or getattr(
         retriever, "retrievers", []
     ):

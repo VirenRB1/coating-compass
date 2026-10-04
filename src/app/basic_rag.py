@@ -21,6 +21,7 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 from src.app.contextual_bm25 import ContextualBM25Retriever
 from src.app.evidence import render_retrieval_context
 from src.app.prompt_registry import fetch_baseline_prompt
+from src.app.reranking import build_reranking_retriever, cohere_api_key
 from src.config import (
     add_params_argument,
     get_params,
@@ -410,7 +411,8 @@ def retrieval_name(retrieval_mode: str) -> str:
     if resolved == "contextual-bm25":
         return get_params().retrieval.bm25_name
     if resolved == "contextual-hybrid":
-        return get_params().retrieval.hybrid_name
+        name = get_params().retrieval.hybrid_name
+        return f"{name}-cohere" if get_params().reranking.enabled else name
     return dense_collection(resolved)
 
 
@@ -434,6 +436,12 @@ def retrieval_metadata(retrieval_mode: str) -> dict:
         "hybrid_bm25_k": settings.hybrid_bm25_k if is_hybrid else None,
         "hybrid_weights": list(settings.hybrid_weights) if is_hybrid else None,
         "hybrid_rrf_c": settings.hybrid_rrf_c if is_hybrid else None,
+        "reranking_model": get_params().reranking.model
+        if is_hybrid and get_params().reranking.enabled
+        else None,
+        "reranking_implementation": "langchain-cohere-rerank-v1"
+        if is_hybrid and get_params().reranking.enabled
+        else None,
     }
 
 
@@ -469,10 +477,15 @@ def build_retriever(retrieval_mode: str | None = None):
     """Return one object with the simple ``invoke(question)`` interface."""
 
     resolved = resolve_retrieval_mode(retrieval_mode)
+    if get_params().reranking.enabled and resolved != "contextual-hybrid":
+        raise ValueError("Cohere reranking is supported only for contextual-hybrid.")
     if resolved == "contextual-bm25":
         return build_contextual_bm25_retriever()
     if resolved == "contextual-hybrid":
         settings = get_params().retrieval
+        # Validate Cohere credentials before opening Qdrant or embedding anything.
+        if get_params().reranking.enabled:
+            cohere_api_key()
         documents = load_complete_contextual_documents()
         lexical = ContextualBM25Retriever(documents, k=settings.hybrid_bm25_k)
         dense = build_vector_store(
@@ -489,6 +502,12 @@ def build_retriever(retrieval_mode: str | None = None):
             c=settings.hybrid_rrf_c,
             id_key="chunk_id",
         )
+        if get_params().reranking.enabled:
+            try:
+                return build_reranking_retriever(ensemble)
+            except Exception:
+                dense.vectorstore.client.close()
+                raise
         return ensemble | RunnableLambda(lambda documents: documents[: settings.k])
 
     # LangChain already provides the same invoke interface for Qdrant.

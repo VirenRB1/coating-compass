@@ -45,6 +45,11 @@ retrieval:
   hybrid_bm25_k: 5
   hybrid_weights: [0.5, 0.5] # dense, BM25
   hybrid_rrf_c: 60
+reranking:
+  enabled: false # enable in a separate contextual-hybrid experiment
+  model: rerank-v4.0-fast
+  requests_per_minute: 9 # below Cohere trial's 10 requests/minute
+  timeout_seconds: 60
 contextualization:
   knowledge_base_version: contextual-dense-v1
   provider: groq

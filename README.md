@@ -121,6 +121,47 @@ memory; no additional persistent index is required. Reports record the fusion se
 Use a separate complete YAML with `retrieval.mode: contextual-hybrid` to evaluate it
 without changing the application's `auto` default.
 
+### Cohere reranking experiment
+
+Set `retrieval.mode: contextual-hybrid` and `reranking.enabled: true` in a complete
+experiment YAML. The flow becomes contextual dense + BM25 -> RRF -> Cohere -> final
+K original manufacturer passages. Cohere sees the full deduplicated candidate pool
+(up to 10 with current settings), before the final five-passage cut. It receives only
+original passage text, preserves citation metadata, and adds `relevance_score`.
+This orders/selects passages; it does not summarize them or establish coating safety.
+No relevance threshold is applied. Set `reranking.enabled: false` to compare RRF alone.
+
+Create a **trial/evaluation** key at https://dashboard.cohere.com/api-keys and set
+`COHERE_API_KEY` in your local `.env`. A production key can incur charges; the application
+cannot identify the billing tier from the key. Cohere currently documents 1,000 trial
+calls/month and 10 rerank requests/minute:
+https://docs.cohere.com/v2/docs/rate-limits.
+The selected model is `rerank-v4.0-fast`; configure its name, timeout, and shared pacing
+under `reranking`. Nine requests/minute leaves headroom for the trial limit; the limiter
+is shared by case workers within one retriever/process, not across separate terminals.
+Automatic SDK retries are disabled so they cannot bypass pacing. API failures surface
+and can be resumed; the pipeline does not silently fall back to unreranked evidence.
+
+Prepared local configurations (ignored under `data/evaluations/results/`):
+
+```powershell
+# Offline configuration validation
+uv run python -m src.config --params data/evaluations/results/params-cohere-smoke.yaml
+# After approving hosted generator/judge costs
+uv run python -m src.evals.application_evals.evaluate_full_pipeline `
+  --params data/evaluations/results/params-cohere-smoke.yaml --label cohere-smoke
+```
+
+The smoke configuration selects `manual_002`; `params-cohere-full.yaml` selects all
+20 cases. Both preserve the prior hybrid candidate counts, weights, final K, generator,
+judge, prompt, and corpus. They change only reranking (plus operational worker/case
+selection). Reports record the reranker identity and normalized settings; new fields
+must be added to old YAML files before validation, without altering historical reports.
+Cohere access was verified on `manual_002`: ten BM25-selected original passages were
+reranked to five, with unchanged source text and citation metadata. This checked the
+hosted API and evidence boundary without paid embeddings, generation, or judging;
+it was not the full hybrid experiment. Full-pipeline evaluation remains pending.
+
 Full-pipeline/comparison reports go under `paths.reports`; component JSON goes under
 `paths.evaluation_results`. Cases preserve references, original manufacturer context,
 answers, scores, and judge reasons. Each new run stores `run.params` (normalized

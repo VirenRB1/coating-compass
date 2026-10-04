@@ -129,6 +129,13 @@ class Retrieval(SettingsModel):
         return self
 
 
+class Reranking(SettingsModel):
+    enabled: bool
+    model: Text
+    requests_per_minute: PositiveFloat
+    timeout_seconds: PositiveFloat
+
+
 class Contextualization(SettingsModel):
     knowledge_base_version: Text
     provider: Literal["groq", "openai", "auto"]
@@ -237,10 +244,19 @@ class Params(SettingsModel):
     embeddings: Embeddings
     generator: Generator
     retrieval: Retrieval
+    reranking: Reranking
     contextualization: Contextualization
     golden_generation: GoldenGeneration
     prompt: Prompt
     evaluation: Evaluation
+
+    @model_validator(mode="after")
+    def reranking_requires_hybrid(self):
+        if self.reranking.enabled and self.retrieval.mode != "contextual-hybrid":
+            raise ValueError(
+                "Cohere reranking requires retrieval.mode: contextual-hybrid"
+            )
+        return self
 
 
 _params: Params | None = None
