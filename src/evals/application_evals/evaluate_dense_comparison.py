@@ -5,7 +5,6 @@ import copy
 import hashlib
 import json
 import logging
-import math
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -42,23 +41,14 @@ from src.evals.application_evals.evaluate_full_pipeline import (
     validate_resume_input,
     validate_resume_retrieval,
 )
-from src.evals.application_evals.metrics import METRIC_NAMES
 from src.evals.application_evals.reporting import (
     calculate_averages,
+    case_complete,
     write_json_report,
     write_markdown_report,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def case_complete(case):
-    return set(case.get("metrics", {})) == set(METRIC_NAMES) and all(
-        isinstance(metric.get("score"), (int, float))
-        and math.isfinite(metric["score"])
-        and metric.get("error") in (None, "empty_actual_output")
-        for metric in case["metrics"].values()
-    )
 
 
 def main():

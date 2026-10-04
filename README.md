@@ -71,7 +71,7 @@ uv run python main.py --ingest-only
 ```
 
 Choose `retrieval.mode` in YAML: `auto`, `baseline-dense`, `contextual-dense`, or
-`contextual-bm25`. Auto selects contextual dense when the manifest declares completion,
+`contextual-bm25`, or `contextual-hybrid`. Auto selects contextual dense when the manifest declares completion,
 otherwise baseline dense. Explicit contextual modes fail on unusable artifacts.
 Dense ingestion embeds missing chunks and reuses compatible existing points.
 
@@ -109,7 +109,17 @@ uv run python -m src.evals.application_evals.evaluate_dense_comparison --label d
 Questions and each answer's seven metrics run concurrently. `comparison_workers`
 controls case workers; `generator_rpm` shares LangChain request pacing across both
 modes. Three requests/minute is not an exact token limiter. Logs identify [A]/[B]
-progress; hybrid retrieval remains a future experiment.
+progress. Single-mode full-pipeline evaluation uses the same generator pacing.
+
+Hybrid mode uses LangChain's `EnsembleRetriever` to fuse contextual dense and contextual
+BM25 rankings with reciprocal rank fusion, deduplicated by stable chunk ID. Configure
+`retrieval.hybrid_dense_k`, `hybrid_bm25_k`, `hybrid_weights` (dense, BM25), and
+`hybrid_rrf_c` in YAML; `retrieval.k` limits the final evidence count. Initial controls
+are 5 candidates per branch, equal weights, RRF constant 60, and 5 final original
+manufacturer chunks. It reuses the contextual dense collection and builds BM25 in
+memory; no additional persistent index is required. Reports record the fusion settings.
+Use a separate complete YAML with `retrieval.mode: contextual-hybrid` to evaluate it
+without changing the application's `auto` default.
 
 Full-pipeline/comparison reports go under `paths.reports`; component JSON goes under
 `paths.evaluation_results`. Cases preserve references, original manufacturer context,
@@ -131,7 +141,9 @@ uv run python -m src.evals.application_evals.evaluate_dense_comparison `
 Resume rejects changed settings, dataset hashes, retrieval/generator identities, or
 prompt versions. Historical reports without snapshots remain readable but cannot
 be resumed; start a new run instead of inventing configuration for old evidence.
-Comparison checkpoints preserve answers and completed metrics. The generator
+Full-pipeline and comparison checkpoints preserve answers and completed metrics.
+When all pending answers are saved, resume skips retrieval/generation and runs only
+missing metrics. Failed attempts remain recorded in run metadata. The generator
 component automatically resumes matching partial runs.
 
 ## Framework-first engineering

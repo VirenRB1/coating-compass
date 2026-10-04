@@ -7,10 +7,12 @@ it is intentionally separate from deterministic tests.
 
 import argparse
 import asyncio
+import copy
 import hashlib
 import json
 import os
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
@@ -20,6 +22,7 @@ from typing import Any
 import truststore
 from deepeval.test_case import LLMTestCase
 from dotenv import load_dotenv
+from langchain_core.rate_limiters import InMemoryRateLimiter
 
 from src.app.basic_rag import (
     build_retriever,
@@ -43,6 +46,7 @@ from src.config import path as config_path
 from src.evals.application_evals.metrics import build_full_pipeline_metrics
 from src.evals.application_evals.reporting import (
     calculate_averages,
+    case_complete,
     write_json_report,
     write_markdown_report,
 )
@@ -143,13 +147,28 @@ def validate_resume_retrieval(
     saved_mode = run.get("retrieval_mode")
     if saved_mode is not None and saved_mode != retrieval_config["retrieval_mode"]:
         raise ValueError("Cannot resume: retrieval mode has changed.")
-    for setting in ("retrieval_k", "bm25_k1", "bm25_b", "bm25_implementation"):
+    for setting in (
+        "retrieval_k",
+        "bm25_k1",
+        "bm25_b",
+        "bm25_implementation",
+        "hybrid_implementation",
+        "hybrid_dense_k",
+        "hybrid_bm25_k",
+        "hybrid_weights",
+        "hybrid_rrf_c",
+    ):
         if run.get(setting) != retrieval_config[setting]:
             raise ValueError(f"Cannot resume: {setting} has changed.")
 
 
 def close_retriever(retriever) -> None:
-    """Close a dense retriever's local Qdrant client; BM25 owns no resources."""
+    """Close dense clients inside native retrievers or composed hybrid branches."""
+
+    for child in getattr(retriever, "steps", []) or getattr(
+        retriever, "retrievers", []
+    ):
+        close_retriever(child)
 
     vector_store = getattr(retriever, "vectorstore", None)
     client = getattr(vector_store, "client", None)
@@ -256,9 +275,9 @@ async def measure_case_metrics(
     )
     errors = [result for result in results if isinstance(result, Exception)]
     if errors:
-        raise RuntimeError(f"{len(errors)} metric(s) failed: {errors[0]}") from errors[
-            0
-        ]
+        raise RuntimeError(
+            f"{len(errors)} metric(s) failed: {type(errors[0]).__name__}: {errors[0]}"
+        ) from errors[0]
 
 
 def evaluate_case(
@@ -375,12 +394,20 @@ def main() -> None:
         ):
             raise ValueError("Cannot resume: Langfuse prompt version has changed.")
         markdown_path = json_path.with_suffix(".md")
+        output["run"].setdefault("previous_attempts", []).append(
+            {
+                "status": output["run"]["status"],
+                "failures": copy.deepcopy(output["run"].get("failures", [])),
+            }
+        )
         output["run"]["status"] = "running"
         output["run"].pop("failures", None)
         output["run"]["workers"] = args.workers
         output["run"]["metric_timeout_seconds"] = args.metric_timeout_seconds
         output["run"]["goldens_path"] = str(args.goldens)
-        print(f"Resuming {len(output['cases'])}/{len(indexed_goldens)} completed cases")
+        print(
+            f"Resuming {sum(case_complete(case) for case in output['cases'])}/{len(indexed_goldens)} completed cases; {len(output['cases'])} answers saved"
+        )
     else:
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         stem = f"full_pipeline_{label}_{timestamp}"
@@ -424,14 +451,38 @@ def main() -> None:
         "retrieval_k": get_params().retrieval.k,
         "metric_timeout_seconds": args.metric_timeout_seconds,
     }
-    retriever = build_retriever(args.retrieval_mode)
-    rag_graph = create_rag_graph(retriever, prompt_version.text)
-    completed_ids = {case["case_id"] for case in output["cases"]}
+    saved_cases = {case["case_id"]: case for case in output["cases"]}
+    completed_ids = {
+        case_id for case_id, case in saved_cases.items() if case_complete(case)
+    }
+    checkpoint_lock = threading.Lock()
+
+    def checkpoint(case):
+        with checkpoint_lock:
+            saved_cases[case["case_id"]] = copy.deepcopy(case)
+            output["cases"] = sorted(
+                saved_cases.values(), key=lambda item: item["case_id"]
+            )
+            output["averages"] = calculate_averages(
+                [item for item in output["cases"] if case_complete(item)]
+            )
+            write_json_report(json_path, output)
+
     pending_goldens = [
         (index, golden)
         for index, golden in indexed_goldens
         if f"manual_{index:03d}" not in completed_ids
     ]
+    retriever, rag_graph = None, None
+    if any(f"manual_{index:03d}" not in saved_cases for index, _ in pending_goldens):
+        retriever = build_retriever(args.retrieval_mode)
+        limiter = InMemoryRateLimiter(
+            requests_per_second=get_params().evaluation.generator_rpm / 60,
+            max_bucket_size=1,
+        )
+        rag_graph = create_rag_graph(
+            retriever, prompt_version.text, rate_limiter=limiter
+        )
     failures = []
     with ThreadPoolExecutor(
         max_workers=min(args.workers, len(pending_goldens) or 1)
@@ -444,18 +495,20 @@ def main() -> None:
                 rag_graph=rag_graph,
                 judge_model=judge_model,
                 hyperparameters=hyperparameters,
+                checkpoint=checkpoint,
+                existing_case=copy.deepcopy(saved_cases.get(f"manual_{index:03d}")),
             ): f"manual_{index:03d}"
             for index, golden in pending_goldens
         }
         for future in as_completed(futures):
             case_id = futures[future]
             try:
-                output["cases"].append(future.result())
-                output["cases"].sort(key=lambda case: case["case_id"])
-                output["averages"] = calculate_averages(output["cases"])
-                write_json_report(json_path, output)
+                result = future.result()
+                checkpoint(result)
+                if not case_complete(result):
+                    raise ValueError("Case did not produce seven finite metric scores.")
                 print(
-                    f"Saved {len(output['cases'])}/{len(indexed_goldens)} "
+                    f"Saved {sum(case_complete(case) for case in output['cases'])}/{len(indexed_goldens)} "
                     "completed cases"
                 )
             except Exception as error:
@@ -464,9 +517,10 @@ def main() -> None:
                     "type": type(error).__name__,
                     "message": str(error),
                 }
-                failures.append(failure)
-                output["run"]["failures"] = failures
-                write_json_report(json_path, output)
+                with checkpoint_lock:
+                    failures.append(failure)
+                    output["run"]["failures"] = failures
+                    write_json_report(json_path, output)
 
     if failures:
         output["run"]["status"] = "incomplete"

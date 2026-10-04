@@ -1,10 +1,21 @@
 """JSON and Markdown artifact helpers for full-pipeline evaluations."""
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
 from .metrics import METRIC_NAMES
+
+
+def case_complete(case):
+    """Recognize a complete checkpoint consistently across evaluation runners."""
+    return set(case.get("metrics", {})) == set(METRIC_NAMES) and all(
+        isinstance(metric.get("score"), (int, float))
+        and math.isfinite(metric["score"])
+        and metric.get("error") in (None, "empty_actual_output")
+        for metric in case["metrics"].values()
+    )
 
 
 def calculate_averages(cases: list[dict[str, Any]]) -> dict[str, float]:
@@ -47,6 +58,10 @@ def write_markdown_report(output_path: Path, result: dict[str, Any]) -> None:
         f"- Timestamp (UTC): `{run['timestamp_utc']}`",
         f"- Status: `{run['status']}`",
         f"- Collection: `{run['collection']}`",
+        f"- Retrieval mode: `{run.get('retrieval_mode', 'not recorded')}`",
+        f"- Hybrid fusion: `{run.get('hybrid_implementation')}`",
+        f"- Hybrid dense/BM25 candidates: `{run.get('hybrid_dense_k')}` / `{run.get('hybrid_bm25_k')}`",
+        f"- Hybrid weights / RRF constant: `{run.get('hybrid_weights')}` / `{run.get('hybrid_rrf_c')}`",
         f"- Retrieval K: `{run['retrieval_k']}`",
         f"- Embedding model: `{run['embedding_model']}`",
         f"- Generator provider: `{run.get('generator_provider', 'groq')}`",

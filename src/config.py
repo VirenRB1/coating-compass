@@ -24,7 +24,9 @@ PositiveFloat = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 NonNegativeFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 Score = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
-Mode = Literal["auto", "baseline-dense", "contextual-dense", "contextual-bm25"]
+Mode = Literal[
+    "auto", "baseline-dense", "contextual-dense", "contextual-bm25", "contextual-hybrid"
+]
 Reasoning = Literal["minimal", "low", "medium", "high"]
 
 
@@ -110,11 +112,20 @@ class Retrieval(SettingsModel):
     bm25_name: Text
     bm25_k1: NonNegativeFloat
     bm25_b: Score
+    hybrid_name: Text
+    hybrid_dense_k: PositiveInt
+    hybrid_bm25_k: PositiveInt
+    hybrid_weights: tuple[Score, Score]
+    hybrid_rrf_c: PositiveInt
 
     @model_validator(mode="after")
     def distinct_collections(self):
         if self.baseline_collection == self.contextual_collection:
             raise ValueError("baseline and contextual collections must be different")
+        if abs(sum(self.hybrid_weights) - 1) > 1e-9 or any(
+            weight <= 0 for weight in self.hybrid_weights
+        ):
+            raise ValueError("hybrid_weights must be positive and sum to one")
         return self
 
 

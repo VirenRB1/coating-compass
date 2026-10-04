@@ -6,10 +6,11 @@ from typing import TypedDict
 
 import truststore
 from dotenv import load_dotenv
+from langchain_classic.retrievers import EnsembleRetriever
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
@@ -41,6 +42,7 @@ RETRIEVAL_MODES = (
     "baseline-dense",
     "contextual-dense",
     "contextual-bm25",
+    "contextual-hybrid",
 )
 
 
@@ -320,9 +322,12 @@ def build_baseline_vector_store(
 
 
 def build_contextual_vector_store(
-    client: QdrantClient, embeddings: Embeddings
+    client: QdrantClient,
+    embeddings: Embeddings,
+    contextual_documents: list[tuple[str, Document, str]] | None = None,
 ) -> QdrantVectorStore:
-    contextual_documents = load_complete_contextual_documents()
+    if contextual_documents is None:
+        contextual_documents = load_complete_contextual_documents()
     vector_store = create_qdrant_store(
         client,
         get_params().retrieval.contextual_collection,
@@ -395,7 +400,7 @@ def dense_collection(mode: str) -> str:
     settings = get_params().retrieval
     return (
         settings.contextual_collection
-        if mode == "contextual-dense"
+        if mode in {"contextual-dense", "contextual-hybrid"}
         else settings.baseline_collection
     )
 
@@ -404,24 +409,37 @@ def retrieval_name(retrieval_mode: str) -> str:
     resolved = resolve_retrieval_mode(retrieval_mode)
     if resolved == "contextual-bm25":
         return get_params().retrieval.bm25_name
+    if resolved == "contextual-hybrid":
+        return get_params().retrieval.hybrid_name
     return dense_collection(resolved)
 
 
 def retrieval_metadata(retrieval_mode: str) -> dict:
     resolved = resolve_retrieval_mode(retrieval_mode)
     is_bm25 = resolved == "contextual-bm25"
+    is_hybrid = resolved == "contextual-hybrid"
+    settings = get_params().retrieval
     return {
         "retrieval_mode": resolved,
         "retrieval_k": get_params().retrieval.k,
         # BM25 is rebuilt in memory; only dense modes have Qdrant collections.
         "collection": None if is_bm25 else dense_collection(resolved),
-        "bm25_k1": get_params().retrieval.bm25_k1 if is_bm25 else None,
-        "bm25_b": get_params().retrieval.bm25_b if is_bm25 else None,
-        "bm25_implementation": "langchain-bm25okapi-v2" if is_bm25 else None,
+        "bm25_k1": settings.bm25_k1 if is_bm25 or is_hybrid else None,
+        "bm25_b": settings.bm25_b if is_bm25 or is_hybrid else None,
+        "bm25_implementation": "langchain-bm25okapi-v2"
+        if is_bm25 or is_hybrid
+        else None,
+        "hybrid_implementation": "langchain-ensemble-rrf-v1" if is_hybrid else None,
+        "hybrid_dense_k": settings.hybrid_dense_k if is_hybrid else None,
+        "hybrid_bm25_k": settings.hybrid_bm25_k if is_hybrid else None,
+        "hybrid_weights": list(settings.hybrid_weights) if is_hybrid else None,
+        "hybrid_rrf_c": settings.hybrid_rrf_c if is_hybrid else None,
     }
 
 
-def build_vector_store(retrieval_mode: str | None = None) -> QdrantVectorStore:
+def build_vector_store(
+    retrieval_mode: str | None = None, *, contextual_documents=None
+) -> QdrantVectorStore:
     resolved = resolve_retrieval_mode(retrieval_mode)
     if resolved == "contextual-bm25":
         raise ValueError("contextual-bm25 does not use a vector store.")
@@ -437,8 +455,10 @@ def build_vector_store(retrieval_mode: str | None = None) -> QdrantVectorStore:
     config_path("vector_store").mkdir(parents=True, exist_ok=True)
     client = QdrantClient(path=str(config_path("vector_store")))
     try:
-        if resolved == "contextual-dense":
-            return build_contextual_vector_store(client, embeddings)
+        if resolved in {"contextual-dense", "contextual-hybrid"}:
+            return build_contextual_vector_store(
+                client, embeddings, contextual_documents
+            )
         return build_baseline_vector_store(client, embeddings, embedding_model)
     except Exception:
         client.close()
@@ -451,6 +471,25 @@ def build_retriever(retrieval_mode: str | None = None):
     resolved = resolve_retrieval_mode(retrieval_mode)
     if resolved == "contextual-bm25":
         return build_contextual_bm25_retriever()
+    if resolved == "contextual-hybrid":
+        settings = get_params().retrieval
+        documents = load_complete_contextual_documents()
+        lexical = ContextualBM25Retriever(documents, k=settings.hybrid_bm25_k)
+        dense = build_vector_store(
+            "contextual-dense", contextual_documents=documents
+        ).as_retriever(
+            search_type=settings.search_type,
+            search_kwargs={"k": settings.hybrid_dense_k},
+        )
+        # Rank fusion avoids comparing incomparable dense and BM25 scores.
+        # Both branches return original chunks; identity preserves page citations.
+        ensemble = EnsembleRetriever(
+            retrievers=[dense, lexical],
+            weights=list(settings.hybrid_weights),
+            c=settings.hybrid_rrf_c,
+            id_key="chunk_id",
+        )
+        return ensemble | RunnableLambda(lambda documents: documents[: settings.k])
 
     # LangChain already provides the same invoke interface for Qdrant.
     return build_vector_store(resolved).as_retriever(
