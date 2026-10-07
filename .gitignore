@@ -27,6 +27,11 @@ junit*.xml
 
 .env
 
+# Local MLflow metadata and artifact stores
+mlflow.db*
+mlruns/
+mlartifacts/
+
 # Generated knowledge-base artifacts
 data/processed/
 data/vector_store/

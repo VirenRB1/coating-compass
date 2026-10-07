@@ -166,7 +166,57 @@ Full-pipeline/comparison reports go under `paths.reports`; component JSON goes u
 `paths.evaluation_results`. Cases preserve references, original manufacturer context,
 answers, scores, and judge reasons. Each new run stores `run.params` (normalized
 validated settings) and `run.params_sha256` (canonical SHA-256); Markdown displays
-the hash. These prepare later MLflow logging. No MLflow server/uploads are enabled yet.
+the hash. The single-mode full-pipeline command also creates one local MLflow run.
+
+### Local MLflow experiments
+
+From the repository root, start Terminal 1:
+
+```powershell
+uv run mlflow server --host 127.0.0.1 --port 5000 --workers 1 --backend-store-uri sqlite:///mlflow.db --artifacts-destination ./mlartifacts
+```
+
+Then, after approving hosted generator/judge costs, run Terminal 2:
+
+```powershell
+uv run python -m src.evals.application_evals.evaluate_full_pipeline --label experiment
+```
+
+Open http://127.0.0.1:5000 and select `coating-compass`. The command prints its
+unique MLflow run ID. `MLFLOW_TRACKING_URI` in `.env` selects the endpoint; its
+default is `http://127.0.0.1:5000`. No credentials are needed for this local server.
+One worker keeps server startup light on Windows. SQLite and artifacts stay local
+and ignored by Git. Keep both `mlflow.db` and `mlartifacts/` to retain experiments.
+
+| Experiment component | MLflow location |
+|---|---|
+| Parameters | Parameters tab; `configuration/<original YAML filename>` and `configuration/validated_params.json` |
+| Fixed goldens | `golden_dataset/<original JSON filename>` |
+| Generated evaluation dataset | `evaluation_dataset/full_pipeline_<label>_<timestamp>.json` (existing cases/report schema) |
+| Aggregate scores | Metrics tab: `contextual_recall`, `contextual_precision`, `contextual_relevancy`, `answer_relevancy`, `faithfulness`, `answer_simplicity`, `answer_correctness` |
+| Reproducibility | `reproducibility/`: selected source files, dependency declarations/lock, available source/contextual manifests; Git commit tag when available |
+| Active system prompt | `system_prompt/system_prompt.txt`; prompt name, label, and version tags |
+
+Goldens remain unchanged. Case IDs/limits and dataset hashes remain in the report
+and configuration. Answers, references, retrieved context, individual scores, and
+judge reasons retain their existing representation. Final averages keep their
+definitions; MLflow uses lowercase names with underscores for comparison.
+
+Tracking is required for this command: start the server first. A tracking or
+evaluation error propagates and marks its run FAILED. Case failures retain the
+partial JSON artifact; partial averages are not logged as final MLflow metrics.
+Resume creates a new run for that invocation, including reused answers/scores in
+the resulting report. Historical artifacts are never imported automatically.
+Component evaluators and the paired dense comparison remain separate, untracked
+commands in this stage. No remote tracking or promotion rules are configured.
+
+Offline integration checks use temporary SQLite stores and mocked RAG/judging:
+
+```powershell
+uv run python -m unittest discover -s tests -v
+```
+
+The owner requested these focused tests for this stage; they remain ignored/local.
 
 Resume with identical YAML, dataset, and experiment label:
 
@@ -206,6 +256,7 @@ BM25 records no embedding model or Qdrant collection. Hosted embeddings use Lang
 with automatic token splitting disabled to preserve input text. Immutable PDFs,
 generated embeddings, vector stores, and secrets must never be committed publicly.
 
-Automated test files were removed at the owner's request. Use offline validation
-above and `uv --system-certs tool run ruff check .` for lint. Keep updating the ignored
+Earlier automated tests were removed at the owner's request. Only the new
+owner-requested MLflow checks are present locally. Use offline validation above
+and `uv --system-certs tool run ruff check .` for lint. Keep updating the ignored
 local learning/configuration notes under `docs/`.

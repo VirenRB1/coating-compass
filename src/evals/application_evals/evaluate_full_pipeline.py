@@ -50,6 +50,7 @@ from src.evals.application_evals.reporting import (
     write_json_report,
     write_markdown_report,
 )
+from src.evals.tracking import track_experiment
 
 
 def parse_args() -> argparse.Namespace:
@@ -359,6 +360,11 @@ def main() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
     args = parse_args()
+    with track_experiment(args.params, args.label) as tracker:
+        run_evaluation(args, tracker)
+
+
+def run_evaluation(args, tracker) -> None:
     retrieval_id = retrieval_name(args.retrieval_mode)
     retrieval_config = retrieval_metadata(args.retrieval_mode)
     label = args.label or retrieval_id
@@ -366,6 +372,7 @@ def main() -> None:
     # Dataset validation, selection, and resume identity checks intentionally happen
     # before prompt, embedding, generation, or judge clients can make hosted calls.
     goldens, goldens_hash = load_goldens(args.goldens)
+    tracker.log_goldens(args.goldens)
     indexed_goldens = select_cases(goldens)
     selected_ids = set(args.case_id or [])
 
@@ -394,6 +401,7 @@ def main() -> None:
     if retrieval_config["retrieval_mode"] == "contextual-bm25":
         embedding_model = None
     prompt_version = fetch_baseline_prompt()
+    tracker.log_prompt(prompt_version)
 
     if args.resume:
         saved_prompt_version = output["run"].get("prompt_version")
@@ -535,6 +543,7 @@ def main() -> None:
         output["run"]["status"] = "incomplete"
         write_json_report(json_path, output)
         close_retriever(retriever)
+        tracker.log_results(output, json_path)
         raise RuntimeError(
             f"{len(failures)} case(s) failed; completed cases remain saved at {json_path}"
         )
@@ -543,6 +552,7 @@ def main() -> None:
     write_json_report(json_path, output)
     write_markdown_report(markdown_path, output)
     close_retriever(retriever)
+    tracker.log_results(output, json_path)
     print(f"Saved JSON report to {json_path}")
     print(f"Saved Markdown report to {markdown_path}")
 
