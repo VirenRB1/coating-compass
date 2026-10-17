@@ -5,9 +5,12 @@ import os
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import mlflow
 from dotenv import load_dotenv
+from mlflow.exceptions import MlflowException
+from requests.exceptions import RequestException
 
 from src.config import ROOT, config_snapshot
 from src.config import path as config_path
@@ -79,17 +82,94 @@ class ExperimentTracker:
 
 
 @contextmanager
-def track_experiment(params_path: Path | None, label: str | None):
-    """One invocation, one run. Exceptions leave the MLflow run FAILED."""
+def tracking_destination():
+    """Configure one server; never retry against a different destination."""
     load_dotenv(ROOT / ".env")
-    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000"))
-    mlflow.set_experiment("coating-compass")
-    # Refuse implicit reuse/nesting: this command owns a whole experiment.
+    # Refuse implicit reuse/nesting, including a run ID loaded from .env.
     if mlflow.active_run() is not None or os.getenv("MLFLOW_RUN_ID"):
         raise RuntimeError(
             "Evaluation needs its own MLflow run; clear the active run/MLFLOW_RUN_ID."
         )
-    with mlflow.start_run(run_name=label, tags={"stage": "development"}) as run:
+    uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000").strip()
+    if not uri:
+        raise ValueError(
+            "MLFLOW_TRACKING_URI is empty; select a local or remote server."
+        )
+    try:
+        endpoint = urlsplit(uri)
+        hostname = endpoint.hostname
+        # Accessing port also validates malformed port values.
+        _ = endpoint.port
+    except ValueError:
+        raise ValueError(
+            "MLFLOW_TRACKING_URI is malformed; check the server URL."
+        ) from None
+    if not endpoint.scheme:
+        raise ValueError(
+            "MLFLOW_TRACKING_URI needs a scheme, such as http:// or https://."
+        )
+    if endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
+        raise ValueError(
+            "Keep credentials out of MLFLOW_TRACKING_URI; use "
+            "MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD. "
+            "Query strings and fragments are not supported."
+        )
+    remote = endpoint.scheme in {"http", "https"} and hostname not in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+    }
+    if endpoint.scheme in {"http", "https"} and not hostname:
+        raise ValueError("MLFLOW_TRACKING_URI needs a server hostname.")
+    if hostname == "dagshub.com":
+        parts = endpoint.path.strip("/").split("/")
+        if (
+            endpoint.scheme != "https"
+            or len(parts) != 2
+            or not parts[0]
+            or not parts[1].endswith(".mlflow")
+            or parts[1] == ".mlflow"
+            or "<" in uri
+            or ">" in uri
+        ):
+            raise ValueError(
+                "Use the repository endpoint: https://dagshub.com/<owner>/<repo>.mlflow "
+                "with actual owner/repository values."
+            )
+        missing = [
+            name
+            for name in ("MLFLOW_TRACKING_USERNAME", "MLFLOW_TRACKING_PASSWORD")
+            if not os.getenv(name, "").strip()
+        ]
+        if missing:
+            raise ValueError(
+                "DagsHub tracking requires "
+                + ", ".join(missing)
+                + "; set the username and access token locally."
+            )
+    destination = "remote" if remote else "local"
+    print(f"MLflow tracking destination: {destination}", flush=True)
+    try:
+        mlflow.set_tracking_uri(uri)
+        mlflow.set_experiment("coating-compass")
+        yield
+    except (MlflowException, RequestException):
+        # Server responses can contain credentials; do not echo or chain them.
+        raise RuntimeError(
+            f"MLflow {destination} tracking failed. Check MLFLOW_TRACKING_URI, "
+            "server availability, and (for DagsHub) MLFLOW_TRACKING_USERNAME, "
+            "MLFLOW_TRACKING_PASSWORD and repository write access. "
+            "No fallback server was used; a partial run may exist on the selected server."
+        ) from None
+
+
+@contextmanager
+def track_experiment(params_path: Path | None, label: str | None):
+    """One invocation, one run. Exceptions leave the MLflow run FAILED."""
+    with (
+        tracking_destination(),
+        mlflow.start_run(run_name=label, tags={"stage": "development"}) as run,
+    ):
         print(f"MLflow run ID: {run.info.run_id}", flush=True)
         # 1. Original YAML plus the validated configuration actually used.
         snapshot = config_snapshot()

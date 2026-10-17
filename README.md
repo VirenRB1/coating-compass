@@ -166,14 +166,63 @@ Full-pipeline/comparison reports go under `paths.reports`; component JSON goes u
 `paths.evaluation_results`. Cases preserve references, original manufacturer context,
 answers, scores, and judge reasons. Each new run stores `run.params` (normalized
 validated settings) and `run.params_sha256` (canonical SHA-256); Markdown displays
-the hash. The single-mode full-pipeline command also creates one local MLflow run.
+the hash. The single-mode full-pipeline command also creates one MLflow run on the
+configured local or remote tracking server.
 
-### Local MLflow experiments
+### MLflow experiments: local or DagsHub
+
+Stage 2 reuses the Stage 1 MLflow client, experiment `coating-compass`, and logging
+helpers. Only the tracking destination changes. No DagsHub Python client is needed:
+MLflow supports DagsHub's HTTP authentication directly. Dependencies remain managed
+by `uv`/`pyproject.toml`. See [DagsHub's tracking setup](https://dagshub.com/docs/feature_guide/experiment_tracking/).
+
+For remote tracking:
+
+1. Create or connect the Coating Compass repository on DagsHub.
+2. Obtain its MLflow endpoint from the repository's tracking setup. Use the actual
+   owner and repository; neither is inferred from the GitHub repository.
+3. Create a DagsHub access token for a user with write/contributor access.
+4. Set these values in the ignored local `.env` (replace placeholders):
+
+   ```dotenv
+   MLFLOW_TRACKING_URI=https://dagshub.com/<owner>/<repo>.mlflow
+   MLFLOW_TRACKING_USERNAME=<dagshub-user>
+   MLFLOW_TRACKING_PASSWORD=<dagshub-access-token>
+   ```
+
+   Shell environment variables override `.env`. Never put tokens in YAML, source,
+   a URL, or a command saved in shell history. The standard username/token pair
+   above is the authentication method validated by this project.
+5. After approving the normal hosted evaluation costs, run the existing command:
+
+   ```powershell
+   uv run python -m src.evals.application_evals.evaluate_full_pipeline --label experiment
+   ```
+
+6. Open the DagsHub repository, select its Experiments/MLflow UI, and select
+   `coating-compass`. You can also open the configured `.mlflow` endpoint in your
+   browser and sign in. No local MLflow server is required for remote tracking.
+7. Locate the printed MLflow run ID and inspect the run name, status, Parameters,
+   Metrics, and all artifact folders in the table below. A complete evaluation
+   should produce one FINISHED run containing all six components.
+
+Tracking prints `remote` or `local` without printing connection credentials.
+An empty URI or incomplete DagsHub credentials fails before server/model calls.
+Authentication, connection, and upload failures stop the command with a tracking
+error; there is no local fallback or second run. For 401/403, check the username,
+token and repository write access. Check the repository endpoint for a 404 and
+network/server availability for a connection failure. A failed upload may leave
+a partial remote run; inspect it and the existing local report before retrying.
+Source server errors are suppressed from the raised error to avoid leaking secrets.
+
+For local development, set `MLFLOW_TRACKING_URI=http://127.0.0.1:5000` and follow
+the server instructions below. Remove DagsHub authentication variables when using
+an unauthenticated local server. The evaluator and experiment name stay the same.
 
 From the repository root, start Terminal 1:
 
 ```powershell
-uv run mlflow server --host 127.0.0.1 --port 5000 --workers 1 --backend-store-uri sqlite:///mlflow.db --artifacts-destination ./mlartifacts
+uv --system-certs tool run --python 3.13 --from "mlflow==3.16.1" mlflow server --host 127.0.0.1 --port 5000 --workers 1 --backend-store-uri sqlite:///mlflow.db --artifacts-destination ./mlartifacts
 ```
 
 Then, after approving hosted generator/judge costs, run Terminal 2:
@@ -187,6 +236,27 @@ unique MLflow run ID. `MLFLOW_TRACKING_URI` in `.env` selects the endpoint; its
 default is `http://127.0.0.1:5000`. No credentials are needed for this local server.
 One worker keeps server startup light on Windows. SQLite and artifacts stay local
 and ignored by Git. Keep both `mlflow.db` and `mlartifacts/` to retain experiments.
+
+The application installs `mlflow-skinny`, which provides the same tracking APIs.
+The full local server runs in uv's separate tool environment. Keep that separation:
+full MLflow brings matplotlib/fonttools into its environment, and fonttools changes
+pypdf's optional font handling. The existing contextual corpus was extracted without
+that optional library; installing it in the application environment changes four
+chunk identities and correctly triggers the contextual-record validation guard.
+The default dev dependency group retains Alembic for offline SQLite tracking tests.
+
+If upgrading from the full MLflow application dependency, run
+`uv --system-certs sync --reinstall-package mlflow-skinny` (the distributions share
+Python module files, so uninstalling the full package can remove client files), then check
+the existing corpus without API calls or writes:
+
+```powershell
+uv run python -c "from src.app.basic_rag import load_complete_contextual_documents; print(len(load_complete_contextual_documents()), 'validated contextual chunks')"
+```
+
+Expected: `921 validated contextual chunks`. Optional-font warnings are expected
+with the original extraction environment. Do not delete or regenerate the saved
+contextual records merely to resolve this dependency-induced whitespace mismatch.
 
 | Experiment component | MLflow location |
 |---|---|
@@ -202,13 +272,15 @@ and configuration. Answers, references, retrieved context, individual scores, an
 judge reasons retain their existing representation. Final averages keep their
 definitions; MLflow uses lowercase names with underscores for comparison.
 
-Tracking is required for this command: start the server first. A tracking or
-evaluation error propagates and marks its run FAILED. Case failures retain the
+Tracking is required for this command: the configured server must be reachable.
+Evaluation errors mark the run FAILED when the tracking server is available;
+server failures can prevent the final status update. Case failures retain the
 partial JSON artifact; partial averages are not logged as final MLflow metrics.
 Resume creates a new run for that invocation, including reused answers/scores in
 the resulting report. Historical artifacts are never imported automatically.
 Component evaluators and the paired dense comparison remain separate, untracked
-commands in this stage. No remote tracking or promotion rules are configured.
+commands in this stage. No regression comparisons, threshold experiments,
+staging/champion selection, promotion rules or CI regression gates are implemented.
 
 Offline integration checks use temporary SQLite stores and mocked RAG/judging:
 

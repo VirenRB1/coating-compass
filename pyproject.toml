@@ -5,7 +5,7 @@ description = "An evidence-based coating recommendation assistant grounded in ma
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "mlflow>=3.7,<4",
+    "mlflow-skinny>=3.7,<4",
     "deepeval>=3,<4",
     "langchain>=1.0,<2",
     "langchain-classic>=1.0,<2",
@@ -24,3 +24,7 @@ dependencies = [
     "truststore>=0.10,<1",
     "langchain-cohere>=0.5,<0.6",
 ]
+
+[dependency-groups]
+# SQLite-backed offline tracking checks need migrations, not the full MLflow server.
+dev = ["alembic>=1.18.4,<2"]
